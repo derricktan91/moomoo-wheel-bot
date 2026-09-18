@@ -67,6 +67,59 @@ premium; losses are large and open-ended. Eight or nine wins out of ten is the
 the trap documented in the backtest section below, where a 93% win rate turned
 out to be worth nothing once priced properly.
 
+### The three trades, in plain terms
+
+**CSP — cash-secured put.** You sell someone the right to sell you 100 shares at
+a set strike before a set date, and you hold the cash to buy them. You keep the
+premium either way. If the stock stays above the strike, that is the whole
+trade. If it falls below, you buy the shares at the strike — which is why you
+only sell puts on something you want to own. "Cash-secured" is the constraint
+that makes it conservative: a $15 strike ties up $1,500 whether or not you are
+assigned.
+
+**CC — covered call.** The mirror image, once you hold the shares. You sell
+someone the right to buy your 100 shares at a strike. You keep the premium; if
+the stock rises through the strike the shares are called away at that price.
+"Covered" means you own the shares, so the worst case is capped upside rather
+than unlimited loss. The rule that matters: **never write a call below your cost
+basis**, or being called away locks in a loss. `/cc` checks this and flags any
+strike that breaks it.
+
+**LEAPS — a long-dated call**, a year or more out. Not part of the wheel at all;
+it is the opposite position. Where the wheel is short volatility with capped
+upside, a deep in-the-money LEAPS at Δ0.70+ behaves roughly like owning the
+shares for a fraction of the capital, with the loss capped at the premium paid.
+The trap is time value: buy one where most of the price is extrinsic and the
+stock has to rise substantially just to break even, so `/leaps` ranks by *least*
+time value rather than by leverage.
+
+The wheel cycles CSP → assignment → CC → called away → CSP. LEAPS sit beside it
+as a way to hold leveraged upside on a name the wheel would otherwise cap.
+
+---
+
+## What it looks like
+
+**`/bb` — the scanner.** The whole watchlist ranked by how far price sits
+through its Bollinger band. %B below 0.50 is the entry gate; the coloured dot
+and the LEAPS-zone marker come from the same scan that runs every 30 minutes.
+
+![BB scan](docs/bb-scan.png)
+
+**`/quote NVDA` and `/csp SOFI`.** A single-ticker read, then the put chain
+filtered to Δ0.20-0.30 at 30-45 DTE. Each strike carries premium, delta, implied
+vol, open interest, collateral and annualised yield — plus the **IV/RV** ratio,
+which says whether the premium actually covers the movement the stock is
+delivering.
+
+![quote and CSP chain](docs/quote-csp.png)
+
+**`/wheel AVGO` — the entry check.** Applies the documented rules to live data:
+the %B gate, realised volatility to pick the strike rule, then candidate strikes
+with the cost basis you would end up holding if assigned.
+
+![wheel entry check](docs/wheel-avgo.png)
+
 ### Why the Bollinger and RSI check gates entry
 
 Delta tells you the probability of assignment. It says nothing about **where in
