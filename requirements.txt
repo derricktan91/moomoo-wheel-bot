@@ -1,4 +1,5 @@
-futu-api>=9.0
-pandas>=2.0
-numpy>=1.24
 certifi>=2024.2.2
+futu-api>=9.0
+numpy>=1.24
+pandas>=2.0
+pytz>=2024.1
