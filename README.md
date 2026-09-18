@@ -91,14 +91,22 @@ below the risk they carry (one watchlist name was quoting 67% implied against
 ## Setup
 
 ```bash
-pip install futu-api pandas numpy certifi
+pip install -r requirements.txt
 cp .env.example ~/.moomoo_alerts.env   # then fill it in
 python3 telegram_bot.py
 ```
 
-Requires moomoo OpenD running locally on port 11111 with a funded account.
-Scheduling uses `launchd` on macOS; the plists are not included since they
-contain absolute paths.
+Full instructions in **[SETUP.md](SETUP.md)** — installing OpenD, picking the
+right `MOOMOO_SECURITY_FIRM` for your region, finding your account id and
+Telegram chat id, and the optional Claude CLI and scheduling steps.
+
+### A note on the defaults
+
+This is configured for one account, not as a general tool. The watchlist is a
+30-ticker AI/semiconductor book; the option filters are Δ0.20–0.30 at 30–45 DTE
+for short premium and Δ0.65–0.75 at 365+ DTE for LEAPS; the scanner uses
+Bollinger(20) with RSI(14). Those are the parameters one person happens to
+trade, not recommendations. SETUP.md lists every constant worth changing.
 
 ---
 

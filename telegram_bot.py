@@ -1,3 +1,10 @@
+
+# Broker entity and OpenD endpoint come from the environment so this runs
+# outside Singapore. moomoo SG = FUTUSG, US = FUTUINC, HK = FUTUSECURITIES,
+# AU = FUTUAU, JP = FUTUJP, MY = FUTUMY, CA = FUTUCA. See SETUP.md.
+SECURITY_FIRM = os.environ.get("MOOMOO_SECURITY_FIRM", "FUTUSG")
+OPEND_HOST = os.environ.get("OPEND_HOST", "127.0.0.1")
+OPEND_PORT = int(os.environ.get("OPEND_PORT", "11111"))
 #!/usr/bin/env python3
 """
 Interactive Telegram bot for the moomoo account.
@@ -260,7 +267,7 @@ def watchlist_block():
 def today_orders():
     from futu import (OpenSecTradeContext, TrdMarket, SecurityFirm, TrdEnv, RET_OK)
     ctx = OpenSecTradeContext(filter_trdmarket=TrdMarket.US, host="127.0.0.1",
-                              port=11111, security_firm=SecurityFirm.FUTUSG)
+                              port=11111, security_firm=SECURITY_FIRM)
     try:
         ret, d = ctx.order_list_query(trd_env=TrdEnv.REAL, acc_id=pb.ACC_ID)
         if ret != RET_OK:

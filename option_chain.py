@@ -26,6 +26,13 @@ import pandas as pd
 from futu import (OpenQuoteContext, OpenSecTradeContext, TrdMarket, SecurityFirm,
                   TrdEnv, SubType, OptionType, KLType, RET_OK)
 
+# Broker entity and OpenD endpoint come from the environment so this runs
+# outside Singapore. moomoo SG = FUTUSG, US = FUTUINC, HK = FUTUSECURITIES,
+# AU = FUTUAU, JP = FUTUJP, MY = FUTUMY, CA = FUTUCA. See SETUP.md.
+SECURITY_FIRM = os.environ.get("MOOMOO_SECURITY_FIRM", "FUTUSG")
+OPEND_HOST = os.environ.get("OPEND_HOST", "127.0.0.1")
+OPEND_PORT = int(os.environ.get("OPEND_PORT", "11111"))
+
 ACC_ID = int(os.environ.get("MOOMOO_ACC_ID", "0"))
 DTE_LO, DTE_HI = 30, 45
 DELTA_LO, DELTA_HI = 0.20, 0.30      # the band Derrick actually sells
@@ -52,7 +59,7 @@ def holdings(ticker):
     """Shares held and cost basis — only needed for the covered-call side."""
     try:
         t = OpenSecTradeContext(filter_trdmarket=TrdMarket.US, host=HOST, port=PORT,
-                                security_firm=SecurityFirm.FUTUSG)
+                                security_firm=SECURITY_FIRM)
         try:
             ret, pos = t.position_list_query(acc_id=ACC_ID, trd_env=TrdEnv.REAL)
         finally:
