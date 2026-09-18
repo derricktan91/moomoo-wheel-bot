@@ -2,7 +2,15 @@
 # Broker entity and OpenD endpoint come from the environment so this runs
 # outside Singapore. moomoo SG = FUTUSG, US = FUTUINC, HK = FUTUSECURITIES,
 # AU = FUTUAU, JP = FUTUJP, MY = FUTUMY, CA = FUTUCA. See SETUP.md.
-SECURITY_FIRM = os.environ.get("MOOMOO_SECURITY_FIRM", "FUTUSG")
+_FIRMS = ("FUTUSG", "FUTUINC", "FUTUSECURITIES", "FUTUAU",
+           "FUTUJP", "FUTUMY", "FUTUCA")
+SECURITY_FIRM = os.environ.get("MOOMOO_SECURITY_FIRM", "").strip().upper()
+if SECURITY_FIRM not in _FIRMS:
+    # Guessing the region silently is worse than stopping: the wrong entity
+    # fails authentication deep inside the API with no useful error.
+    raise SystemExit(
+        f"MOOMOO_SECURITY_FIRM must be set to your moomoo entity "
+        f"({', '.join(_FIRMS)}). Got {SECURITY_FIRM or '<unset>'}. See SETUP.md.")
 OPEND_HOST = os.environ.get("OPEND_HOST", "127.0.0.1")
 OPEND_PORT = int(os.environ.get("OPEND_PORT", "11111"))
 #!/usr/bin/env python3

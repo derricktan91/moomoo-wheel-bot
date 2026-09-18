@@ -54,7 +54,15 @@ moomoo operates separate legal entities and the API needs to know yours:
 | Malaysia | `FUTUMY` |
 | Canada | `FUTUCA` |
 
-The wrong value fails authentication without a useful error, so set it first.
+`MOOMOO_SECURITY_FIRM` is **required** — the scripts refuse to start without a
+valid value rather than guessing, because the wrong entity fails authentication
+deep inside the API with no useful error:
+
+```
+MOOMOO_SECURITY_FIRM must be set to your moomoo entity
+(FUTUSG, FUTUINC, FUTUSECURITIES, FUTUAU, FUTUJP, FUTUMY, FUTUCA).
+Got <unset>. See SETUP.md.
+```
 
 ### Finding `MOOMOO_ACC_ID`
 
