@@ -33,6 +33,87 @@ this repository.**
 
 ---
 
+## The strategy this automates
+
+**The wheel** is a loop. Sell a cash-secured put on a stock you would be content
+to own. If it expires worthless you keep the premium and repeat. If the stock
+falls through your strike you are assigned the shares at that strike — which is
+the point, not the failure — and you then sell covered calls against them until
+they are called away. Then back to selling puts.
+
+```
+  sell cash-secured put ──► expires worthless ──► keep premium ──┐
+           │                                                     │
+           └── assigned ──► own shares ──► sell covered call ──► called away
+                                 ▲               │
+                                 └───────────────┘  keep premium, repeat
+```
+
+Every leg collects premium. The risk is not exotic — it is owning a falling
+stock, the same risk as buying it outright, with a lower entry price and a
+capped upside.
+
+### Why Δ0.20–0.30
+
+Delta approximates the probability an option finishes in the money. Selling a
+0.20-delta put is therefore roughly an **80% chance of expiring worthless**, and
+0.30 is about 70%. That band is the trade-off this account settled on: further
+out is safer but the premium stops being worth the capital tied up; closer in
+pays more but assigns too often to be a premium strategy.
+
+**A high win rate is not the same as an edge.** Wins are small and capped at the
+premium; losses are large and open-ended. Eight or nine wins out of ten is the
+*expected shape* of the strategy, not evidence it is working — which is exactly
+the trap documented in the backtest section below, where a 93% win rate turned
+out to be worth nothing once priced properly.
+
+### Why the Bollinger and RSI check gates entry
+
+Delta tells you the probability of assignment. It says nothing about **where in
+its range you are selling**. Selling a 0.20-delta put on a stock at the top of
+its range and one at the bottom carry the same nominal odds and very different
+outcomes, because assignment price is what you live with afterwards.
+
+So entry is gated on two mean-reversion filters before a strike is ever quoted:
+
+| Filter | Implemented as | Intent |
+|---|---|---|
+| **%B ≤ 0.50** | `bb_telegram_alert.py`, Bollinger(20, 2σ) | price at or below the mid band — selling into weakness, not strength |
+| **RSI ≤ 35** | `wheel_analysis.py`, RSI(14) | momentum stretched rather than mid-trend |
+
+Both are scanned across the watchlist every 30 minutes, so the entry signal
+arrives rather than being hunted for.
+
+The filters are a tilt, not a shield. A stock well below its 200-day can sit
+oversold for months while continuing to fall — "cheap relative to 20 days" is
+not "cheap". The scanner also reports **implied vs realised volatility**, which
+catches the opposite failure: a strike whose premium looks generous but is
+priced below the movement the stock is actually delivering.
+
+### Why LEAPS are in here at all
+
+The wheel is short volatility with capped upside. A LEAPS call is the opposite
+leg — long, leveraged, uncapped — and at **Δ0.65–0.75, 365+ DTE** it behaves
+roughly like owning the shares for a fraction of the capital.
+
+The metric that matters is not yield but **time value**: the share of the
+premium that decays to zero. `/leaps` ranks by least extrinsic and flags
+anything above 60%, because on a high-volatility name even a 0.74-delta call
+can be three-fifths time value — a directional bet carrying decay, not a stock
+substitute. The IV/RV verdict inverts here too: cheap volatility helps a buyer
+and hurts a seller.
+
+### Account access
+
+The owner's chat can read the live account — `/portfolio` for positions and
+open P&L, `/account` for cash, assets and buying power, `/orders` for the day's
+fills. `/cc` additionally checks candidate strikes against the held cost basis
+and flags any that would lock in a loss if called.
+
+All of it is **read-only**. Guests never reach these commands.
+
+---
+
 ## Architecture
 
 ```mermaid
