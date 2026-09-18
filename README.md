@@ -33,6 +33,89 @@ this repository.**
 
 ---
 
+## Architecture
+
+```mermaid
+flowchart TB
+    owner["Owner chat"]:::ext
+    guest["Guest chats"]:::ext
+    owner --> gate
+    guest --> gate
+
+    gate{"chat-id gate<br/>owner · guest · denied"}:::gate
+    gate -. "unknown id<br/>logged, dropped" .-> drop([ ]):::drop
+    gate -->|"guest: 8 market-data cmds"| disp
+    gate -->|"owner: all 14"| disp
+
+    subgraph proc["telegram_bot.py — single process, serial message loop"]
+        disp["dispatcher"]:::core
+        lib["bb_telegram_alert.py<br/><i>env · Telegram send · SSL · BB/RSI</i>"]:::core
+        brief["portfolio_telegram_briefing.py"]:::core
+        wheel["wheel_analysis.py"]:::core
+        disp --> lib
+        disp --> brief
+        disp --> wheel
+    end
+
+    disp -. "subprocess + hard timeout" .-> iso
+
+    subgraph iso["fault-isolated — a broker stall cannot wedge the loop"]
+        chain["option_chain.py<br/><i>/csp /cc /leaps</i>"]:::iso
+        spx["spx_signal.py<br/><i>/spx + backtest harness</i>"]:::iso
+    end
+
+    subgraph sched["launchd — independent of the bot"]
+        s1["bb_telegram_alert.py<br/>every 30 min"]:::sch
+        s2["spx_signal.py --send<br/>weekly"]:::sch
+        s3["KeepAlive supervisor<br/><i>restarts on fail-fast exit</i>"]:::sch
+    end
+    s3 -.->|"restart"| proc
+
+    opend[("moomoo OpenD<br/>127.0.0.1:11111")]:::ext
+    proc -->|"quote + trade ctx<br/><b>read only</b>"| opend
+    iso --> opend
+    s1 --> opend
+    s2 --> opend
+
+    claude["Claude CLI<br/><i>/analyse /news, optional</i>"]:::ext
+    disp -. "owner only" .-> claude
+
+    api(["Telegram Bot API"]):::ext
+    lib --> api
+    s1 --> api
+    s2 --> api
+
+    classDef ext fill:#eef2ff,stroke:#6366f1,color:#1e1b4b
+    classDef gate fill:#fef3c7,stroke:#d97706,color:#451a03
+    classDef core fill:#ecfdf5,stroke:#059669,color:#022c22
+    classDef iso fill:#fff1f2,stroke:#e11d48,color:#4c0519
+    classDef sch fill:#f1f5f9,stroke:#64748b,color:#0f172a
+    classDef drop fill:#e5e7eb,stroke:#9ca3af,color:#374151
+```
+
+Three boundaries carry most of the design:
+
+**The chat-id gate** is the only ingress. Guests reach eight market-data
+commands; everything touching the account — and all free-text, which would
+otherwise put the full portfolio into an LLM prompt — is owner-only. Unknown
+ids are logged and dropped, which doubles as how you discover your own chat id
+on first run.
+
+**The subprocess boundary** exists because the bot handles messages serially
+and the broker API blocks indefinitely on some instruments. Chain and signal
+work runs in child processes under a hard timeout, so a stalled call returns an
+error instead of freezing every other command.
+
+**The supervisor boundary.** The bot exits after N consecutive poll failures
+rather than retrying inside a process whose sockets are already dead, and
+`launchd` restarts it. Scheduled scans run as their own processes, so the
+scanner keeps working even while the bot is down.
+
+Every path to the broker is read-only — there is no order-placing call anywhere
+in the repository.
+
+---
+
 ## The part I'd point at first
 
 I built a backtest for an SPX put credit spread. It reported roughly
