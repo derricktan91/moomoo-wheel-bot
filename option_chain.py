@@ -26,6 +26,7 @@ import pandas as pd
 from futu import (OpenQuoteContext, OpenSecTradeContext, TrdMarket, SecurityFirm,
                   TrdEnv, SubType, OptionType, KLType, RET_OK)
 
+
 # Broker entity and OpenD endpoint come from the environment so this runs
 # outside Singapore. moomoo SG = FUTUSG, US = FUTUINC, HK = FUTUSECURITIES,
 # AU = FUTUAU, JP = FUTUJP, MY = FUTUMY, CA = FUTUCA. See SETUP.md.

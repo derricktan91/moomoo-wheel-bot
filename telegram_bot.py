@@ -1,18 +1,3 @@
-
-# Broker entity and OpenD endpoint come from the environment so this runs
-# outside Singapore. moomoo SG = FUTUSG, US = FUTUINC, HK = FUTUSECURITIES,
-# AU = FUTUAU, JP = FUTUJP, MY = FUTUMY, CA = FUTUCA. See SETUP.md.
-_FIRMS = ("FUTUSG", "FUTUINC", "FUTUSECURITIES", "FUTUAU",
-          "FUTUJP", "FUTUMY", "FUTUCA")
-SECURITY_FIRM = os.environ.get("MOOMOO_SECURITY_FIRM", "").strip().upper()
-if SECURITY_FIRM not in _FIRMS:
-    # Guessing the region silently is worse than stopping: the wrong entity
-    # fails authentication deep inside the API with no useful error.
-    raise SystemExit(
-        f"MOOMOO_SECURITY_FIRM must be set to your moomoo entity "
-        f"({', '.join(_FIRMS)}). Got {SECURITY_FIRM or '<unset>'}. See SETUP.md.")
-OPEND_HOST = os.environ.get("OPEND_HOST", "127.0.0.1")
-OPEND_PORT = int(os.environ.get("OPEND_PORT", "11111"))
 #!/usr/bin/env python3
 """
 Interactive Telegram bot for the moomoo account.
@@ -49,6 +34,22 @@ from bb_telegram_alert import (  # noqa: E402
 )
 import portfolio_telegram_briefing as pb  # noqa: E402
 import wheel_analysis as wa  # noqa: E402
+
+
+# Broker entity and OpenD endpoint come from the environment so this runs
+# outside Singapore. moomoo SG = FUTUSG, US = FUTUINC, HK = FUTUSECURITIES,
+# AU = FUTUAU, JP = FUTUJP, MY = FUTUMY, CA = FUTUCA. See SETUP.md.
+_FIRMS = ("FUTUSG", "FUTUINC", "FUTUSECURITIES", "FUTUAU",
+          "FUTUJP", "FUTUMY", "FUTUCA")
+SECURITY_FIRM = os.environ.get("MOOMOO_SECURITY_FIRM", "").strip().upper()
+if SECURITY_FIRM not in _FIRMS:
+    # Guessing the region silently is worse than stopping: the wrong entity
+    # fails authentication deep inside the API with no useful error.
+    raise SystemExit(
+        f"MOOMOO_SECURITY_FIRM must be set to your moomoo entity "
+        f"({', '.join(_FIRMS)}). Got {SECURITY_FIRM or '<unset>'}. See SETUP.md.")
+OPEND_HOST = os.environ.get("OPEND_HOST", "127.0.0.1")
+OPEND_PORT = int(os.environ.get("OPEND_PORT", "11111"))
 
 DTE_NOTE = "30-45 DTE, ranked by annualised yield"
 LEAPS_NOTE = "365+ DTE, ranked by least time value"

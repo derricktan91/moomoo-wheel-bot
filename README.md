@@ -290,7 +290,9 @@ consecutive poll failures and lets the supervisor restart it with fresh sockets.
 
 **Tiered access control.** Guests get market-data commands only. Anything
 touching the account — and all free-text, which otherwise reaches an LLM with
-the full portfolio in its prompt — is owner-only, gated on chat id.
+the full portfolio in its prompt — is owner-only, gated on chat id and covered by
+`tests/test_access_control.py` — 26 tests that pin the boundary down and run
+in 0.03s without a broker connection.
 
 Unknown chats are told their own id (not a secret, and it grants nothing) and
 the owner is pinged once an hour per chat with an `/allow <id>` command to tap.
@@ -316,6 +318,10 @@ below the risk they carry (one watchlist name was quoting 67% implied against
 pip install -r requirements.txt
 cp .env.example ~/.moomoo_alerts.env   # then fill it in
 python3 telegram_bot.py
+```
+
+```bash
+pip install -r requirements-dev.txt && pytest -q     # 26 tests, no broker needed
 ```
 
 Full instructions in **[SETUP.md](SETUP.md)** — installing OpenD, picking the

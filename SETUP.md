@@ -126,10 +126,32 @@ claude setup-token   # paste the sk-ant-oat01... value into the env file
 
 ## Optional: scheduling
 
-`launchd` plists are not included — they carry absolute paths. The jobs are:
+Templates are in `launchd/`. Replace the three placeholders and install:
 
-| Script | Cadence |
-|---|---|
+```bash
+for f in launchd/com.example.*.plist; do
+  sed -e "s|__REPO_PATH__|$PWD|g" \
+      -e "s|__PYTHON__|$(which python3)|g" \
+      -e "s|__HOME__|$HOME|g" \
+      "$f" > ~/Library/LaunchAgents/$(basename "$f")
+done
+launchctl load ~/Library/LaunchAgents/com.example.*.plist
+```
+
+| Job | Cadence | Notes |
+|---|---|---|
+| `moomoo-telegram-bot` | always on | `KeepAlive` + `ThrottleInterval 15` — restarts 15s after the bot fail-fast exits |
+| `bb-telegram-alert` | every 30 min | US market hours only, in SGT |
+| `spx-monday-signal` | weekly | Monday, before the US open |
+
+The bot job is the one that matters: the bot exits after repeated poll
+failures rather than retrying inside a dead process, and `KeepAlive` is what
+turns that exit into a recovery.
+
+Check status with `launchctl list | grep com.example`. On Linux, systemd
+timers or cron do the same job.
+
+---|---|
 | `telegram_bot.py` | always on, `KeepAlive` |
 | `bb_telegram_alert.py` | every 30 min during market hours |
 | `spx_signal.py --send` | weekly |
@@ -148,6 +170,7 @@ The defaults encode one person's strategy. The interesting constants:
 | `option_chain.py` → `DELTA_LO/HI` | `0.20, 0.30` — the delta band suggested for puts and calls |
 | `option_chain.py` → `LEAPS_*` | `0.65-0.75` delta, 365+ DTE, plus a per-ticker override table |
 | `option_chain.py` → `DTE_LO/HI` | `30, 45` |
+| `wheel_analysis.py` → `MIN_DTE/MAX_DTE` | `30, 45` — the floor `/wheel` will quote |
 | `bb_telegram_alert.py` → `BB_PERIOD` | Bollinger lookback, 20 |
 
 None of these are recommendations — they are the parameters one account happens
