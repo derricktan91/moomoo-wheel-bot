@@ -23,7 +23,9 @@ HV_WINDOW = 30                  # trading days for realised vol
 HIGH_VOL_CUTOFF = 0.60          # >=60% annualised -> 1.28-sigma sizing
 NORMAL_OTM = 0.125              # midpoint of the 10-15% rule
 SIGMA_MULT = 1.28
-MIN_DTE, MAX_DTE = 5, 45
+# 30 is the floor Derrick actually sells at — anything shorter pays too little
+# for the assignment risk and was only ever noise in the output.
+MIN_DTE, MAX_DTE = 30, 45
 MAX_EXPIRIES = 2                # each extra expiry costs a chain + snapshot call
 MIN_OI = 10                     # skip only the truly untradeable
 

@@ -3,7 +3,7 @@
 # outside Singapore. moomoo SG = FUTUSG, US = FUTUINC, HK = FUTUSECURITIES,
 # AU = FUTUAU, JP = FUTUJP, MY = FUTUMY, CA = FUTUCA. See SETUP.md.
 _FIRMS = ("FUTUSG", "FUTUINC", "FUTUSECURITIES", "FUTUAU",
-           "FUTUJP", "FUTUMY", "FUTUCA")
+          "FUTUJP", "FUTUMY", "FUTUCA")
 SECURITY_FIRM = os.environ.get("MOOMOO_SECURITY_FIRM", "").strip().upper()
 if SECURITY_FIRM not in _FIRMS:
     # Guessing the region silently is worse than stopping: the wrong entity
@@ -52,6 +52,8 @@ import wheel_analysis as wa  # noqa: E402
 
 DTE_NOTE = "30-45 DTE, ranked by annualised yield"
 LEAPS_NOTE = "365+ DTE, ranked by least time value"
+# Mutable at runtime so /allow and /revoke take effect without a restart.
+GUESTS = set()
 CLAUDE_BIN = str(Path.home() / ".local/bin/claude")
 CLAUDE_MODEL = "opus"  # switch to "sonnet" if this eats too much of the subscription quota
 CLAUDE_TIMEOUT = 240
@@ -122,6 +124,8 @@ BOT_COMMANDS = [
     ("cc",        "Call chain for a covered call — /cc SOFI"),
     ("leaps",     "LEAPS calls 365+ DTE, ~0.70 delta — /leaps NVDA"),
     ("spx",       "SPX put-spread entry check: vol regime, day, strike"),
+    ("guests",    "List guest chat ids"),
+    ("allow",     "Grant guest access — /allow 123456789"),
     ("analyse",   "Full research report — /analyse NVDA"),
     ("news",      "Macro + your names, or /news SOFI"),
     ("orders",    "Today's orders"),
@@ -159,6 +163,39 @@ def load_guests(cfg):
     guests = {x.strip() for x in raw.split(",") if x.strip()}
     guests.discard(str(cfg.get("TELEGRAM_CHAT_ID", "")).strip())
     return guests
+
+
+def save_guests(guests):
+    """Rewrite TELEGRAM_GUEST_CHAT_IDS in the env file, in place.
+
+    Written atomically via a temp file so a crash mid-write cannot leave the
+    bot with no credentials. Every other line is preserved byte for byte.
+    """
+    from bb_telegram_alert import ENV_FILE
+    line = "TELEGRAM_GUEST_CHAT_IDS=" + ",".join(sorted(guests))
+    lines, seen = [], False
+    for ln in ENV_FILE.read_text().splitlines():
+        if ln.startswith("TELEGRAM_GUEST_CHAT_IDS="):
+            lines.append(line); seen = True
+        else:
+            lines.append(ln)
+    if not seen:
+        lines.append(line)
+    tmp = ENV_FILE.with_suffix(".env.tmp")
+    tmp.write_text("\n".join(lines) + "\n")
+    tmp.chmod(0o600)
+    tmp.replace(ENV_FILE)
+
+
+def register_guest_menu(cfg, chat_id):
+    """Scope the cut-down command list to one guest chat."""
+    try:
+        gs = json.dumps({"type": "chat", "chat_id": int(chat_id)})
+        cmds = json.dumps([{"command": c, "description": d}
+                           for c, d in GUEST_BOT_COMMANDS])
+        api(cfg, "setMyCommands", {"commands": cmds, "scope": gs})
+    except Exception as e:
+        log(f"guest menu for {chat_id} failed: {e}")
 
 
 def register_commands(cfg):
@@ -912,6 +949,51 @@ def handle(cfg, chat_id, text, guest=False):
                     if "error" not in r]
             rows.sort(key=lambda r: r["pct_b"])
             reply(cfg, chat_id, "<b>📊 BB scan</b>\n\n" + fmt_quotes(rows))
+    elif cmd in ("allow", "revoke", "guests"):
+        # Owner-only by construction: guests are bounced by the gate above.
+        # GUESTS is the live set — cfg was parsed at startup and goes stale the
+        # moment /allow writes to the env file, so never read the list from it.
+        gs = set(GUESTS) if GUESTS else load_guests(cfg)
+        if cmd == "guests":
+            if not gs:
+                reply(cfg, chat_id, "No guests. Add one with <code>/allow &lt;chat id&gt;</code>.")
+            else:
+                reply(cfg, chat_id, "<b>Guests</b>\n" +
+                      "\n".join(f"<code>{g}</code>" for g in sorted(gs)) +
+                      "\n\n<i>/revoke &lt;id&gt; to remove</i>")
+            return
+        parts = t.split()
+        if len(parts) < 2:
+            reply(cfg, chat_id, f"Usage: <code>/{cmd} &lt;chat id&gt;</code>")
+            return
+        target = re.sub(r"[^0-9-]", "", parts[1])
+        if not target:
+            reply(cfg, chat_id, f"'{html.escape(parts[1])[:20]}' is not a chat id.")
+            return
+        if target == str(cfg.get("TELEGRAM_CHAT_ID", "")).strip():
+            reply(cfg, chat_id, "That's your own chat id — you already have full access.")
+            return
+        if cmd == "allow":
+            if target in gs:
+                reply(cfg, chat_id, f"<code>{target}</code> already has guest access.")
+                return
+            gs.add(target); save_guests(gs); register_guest_menu(cfg, target)
+            GUESTS.clear(); GUESTS.update(gs)          # live, no restart
+            log(f"ALLOW {target} (by owner)")
+            reply(cfg, chat_id, f"✅ <code>{target}</code> now has guest access "
+                                f"(market data only). {len(gs)} guest(s) total.")
+            try:
+                reply(cfg, target, "✅ Access granted — market data only.\n\n" + GUEST_HELP)
+            except Exception:
+                pass
+        else:
+            if target not in gs:
+                reply(cfg, chat_id, f"<code>{target}</code> is not a guest.")
+                return
+            gs.discard(target); save_guests(gs)
+            GUESTS.clear(); GUESTS.update(gs)
+            log(f"REVOKE {target} (by owner)")
+            reply(cfg, chat_id, f"🚫 <code>{target}</code> revoked. {len(gs)} guest(s) left.")
     elif cmd in ("csp", "cc", "leaps"):
         parts = t.split()
         if len(parts) < 2:
@@ -972,7 +1054,9 @@ def main():
         except Exception:
             offset = 0
 
-    guests = load_guests(cfg)
+    GUESTS.clear(); GUESTS.update(load_guests(cfg))
+    guests = GUESTS
+    seen_requests = {}          # chat_id -> last time the owner was pinged
     log(f"bot up (owner {allowed}"
         f"{', guests ' + ','.join(sorted(guests)) if guests else ', no guests'})"
         f"{' [once]' if once else ''}")
@@ -1010,8 +1094,28 @@ def main():
             is_guest = cid in guests
             if cid != allowed and not is_guest:
                 # Anyone who learns the bot's username can message it; only the
-                # owner's chat and named guests are ever served.
+                # owner's chat and named guests are ever served. Tell the caller
+                # their own id (it is not a secret and grants nothing) and ping
+                # the owner once an hour per chat so a stranger cannot flood him.
                 log(f"DENIED chat {cid}: {msg['text'][:60]!r}")
+                now = time.time()
+                if now - seen_requests.get(cid, 0) > 3600:
+                    seen_requests[cid] = now
+                    frm = msg.get("from", {}) or {}
+                    who = " ".join(x for x in (frm.get("first_name"),
+                                               frm.get("last_name")) if x) or "unknown"
+                    uname = f"@{frm['username']}" if frm.get("username") else "no username"
+                    try:
+                        reply(cfg, cid,
+                              "🔒 This bot is private.\n\n"
+                              f"Your chat id is <code>{cid}</code> — send it to the "
+                              "owner if you should have access.")
+                        reply(cfg, allowed,
+                              f"🔔 <b>Access request</b>\n{html.escape(who)} ({html.escape(uname)})\n"
+                              f"chat id <code>{cid}</code>\n\n"
+                              f"Allow: <code>/allow {cid}</code>")
+                    except Exception as e:
+                        log(f"request notify failed: {e}")
                 continue
             log(f"msg{' [guest ' + cid + ']' if is_guest else ''}: {msg['text'][:80]!r}")
             try:

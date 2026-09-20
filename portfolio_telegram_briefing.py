@@ -3,7 +3,7 @@
 # outside Singapore. moomoo SG = FUTUSG, US = FUTUINC, HK = FUTUSECURITIES,
 # AU = FUTUAU, JP = FUTUJP, MY = FUTUMY, CA = FUTUCA. See SETUP.md.
 _FIRMS = ("FUTUSG", "FUTUINC", "FUTUSECURITIES", "FUTUAU",
-           "FUTUJP", "FUTUMY", "FUTUCA")
+          "FUTUJP", "FUTUMY", "FUTUCA")
 SECURITY_FIRM = os.environ.get("MOOMOO_SECURITY_FIRM", "").strip().upper()
 if SECURITY_FIRM not in _FIRMS:
     # Guessing the region silently is worse than stopping: the wrong entity

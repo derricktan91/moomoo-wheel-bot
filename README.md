@@ -14,7 +14,7 @@ this repository.**
 
 | Component | Purpose |
 |---|---|
-| `telegram_bot.py` | 14-command bot: positions, P&L, option chains, technicals |
+| `telegram_bot.py` | 16-command bot: positions, P&L, option chains, technicals, guest management |
 | `bb_telegram_alert.py` | Bollinger/RSI scan across 30 tickers, every 30 min during market hours |
 | `option_chain.py` | Chain scanner for cash-secured puts, covered calls and LEAPS |
 | `spx_signal.py` | Index credit-spread entry signal with Black-Scholes strike solving |
@@ -25,6 +25,7 @@ this repository.**
 
 ```
 /portfolio /account /orders      live account (owner only)
+/allow /revoke /guests           grant or remove guest access (owner only)
 /quote /bb /watchlist            technicals
 /csp /cc /leaps /wheel           option chains, filtered by delta and DTE
 /spx                             index spread signal
@@ -289,8 +290,12 @@ consecutive poll failures and lets the supervisor restart it with fresh sockets.
 
 **Tiered access control.** Guests get market-data commands only. Anything
 touching the account — and all free-text, which otherwise reaches an LLM with
-the full portfolio in its prompt — is owner-only, gated on chat id and verified
-with a test table before deploy.
+the full portfolio in its prompt — is owner-only, gated on chat id.
+
+Unknown chats are told their own id (not a secret, and it grants nothing) and
+the owner is pinged once an hour per chat with an `/allow <id>` command to tap.
+Granting writes the env file atomically and updates the live set, so access
+changes take effect without a restart.
 
 **Fault isolation.** Chain queries run as subprocesses with hard timeouts. The
 broker API blocks indefinitely on some index ETFs, and the bot handles messages
