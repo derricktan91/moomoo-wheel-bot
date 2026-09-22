@@ -256,6 +256,16 @@ I built a backtest for an SPX put credit spread. It reported roughly
 **+$892/year**. I did not believe the win rate, so I audited it and found two
 defects in my own model:
 
+The corrected pricing is now in the signal itself: `spx_signal.py` pulls the
+live SPY chain per expiry, builds the real volatility smile, solves for the
+0.20-delta strike using the vol *at that strike*, and prices both legs at their
+own IV. On 2026-09-22 that was the difference between a modelled $504 credit
+and a real $314. It also reports the win rate the spread needs to break even —
+93.3% for that contract — which is the number that actually decides the trade.
+If a chain is unavailable it falls back to the flat-IV model, labels the
+candidate `⚠️modelled`, and is forbidden from ranking it first, since an
+inflated credit would otherwise always win on score.
+
 1. **Expiries never settled.** The hold loop broke on the final day *before*
    reaching the settlement branch, so every trade exited at full credit.
    Losses were structurally invisible — the backtest reported a 100% win rate

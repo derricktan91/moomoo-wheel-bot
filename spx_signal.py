@@ -60,6 +60,71 @@ def strike_for_delta(S, T, v, target=DELTA_TARGET):
 
 # --------------------------------------------------------------- data ----
 
+
+def live_iv_curve(expiry, spot):
+    """Per-strike implied vol from the live SPY chain, as SPX points.
+
+    SPX itself is not quotable through OpenD, but SPY is and tracks it at 1:10.
+    Returns a callable iv(K) interpolating the real smile, or None if the chain
+    is unavailable.
+
+    This exists because a single flat IV is wrong in a way that matters. Real
+    chains price the further-OTM long leg HIGHER than the short leg, and on a
+    25-wide spread that differential is worth roughly a third of the credit.
+    Pricing both legs at one vol overstated the credit by ~26% against a live
+    chain on 2026-09-08.
+    """
+    try:
+        from futu import OpenQuoteContext, OptionType, SubType, RET_OK
+        import numpy as np
+        q = OpenQuoteContext(host="127.0.0.1", port=11111)
+        try:
+            ret, ch = q.get_option_chain("US.SPY", start=str(expiry), end=str(expiry),
+                                         option_type=OptionType.PUT)
+            if ret != RET_OK or not len(ch):
+                return None
+            lo, hi = spot / 10 * 0.80, spot / 10 * 1.03
+            ch = ch[(ch.strike_price >= lo) & (ch.strike_price <= hi)][["code", "strike_price"]]
+            if len(ch) < 6:
+                return None
+            q.subscribe(list(ch.code), [SubType.QUOTE])
+            ret, snap = q.get_stock_quote(list(ch.code))
+            if ret != RET_OK:
+                return None
+            m = ch.merge(snap, on="code", suffixes=("", "_q"))
+            m["K"] = m.strike_price.astype(float) * 10          # -> SPX points
+            m["iv"] = m.implied_volatility.astype(float) / 100
+            m = m.dropna(subset=["iv"])
+            m = m[(m.iv > 0.01) & (m.iv < 3.0)].sort_values("K")
+            if len(m) < 6:
+                return None
+            ks, ivs = m.K.values, m.iv.values
+            return lambda K: float(np.interp(K, ks, ivs))
+        finally:
+            q.close()
+    except Exception:
+        return None          # never let a chain failure break the signal
+
+
+def solve_delta_live(spot, T, ivf, target=DELTA_TARGET):
+    """Strike at `target` delta under a real (skewed) vol curve.
+
+    strike_for_delta() assumes one vol everywhere; under a smile the vol at the
+    strike depends on the strike, so this bisects using the local IV.
+    """
+    lo, hi = spot * 0.70, spot
+    for _ in range(60):
+        mid = (lo + hi) / 2
+        v = ivf(mid)
+        h = 1.0
+        d = -(put_price(spot + h, mid, T, v) - put_price(spot - h, mid, T, v)) / (2 * h)
+        if d > target:
+            hi = mid
+        else:
+            lo = mid
+    return mid
+
+
 def fetch_spy(days=400):
     """Daily SPY closes. Explicit start/end — OpenD returns stale bars otherwise."""
     from futu import OpenQuoteContext, KLType, RET_OK
@@ -272,9 +337,19 @@ def analyse():
     for expiry in expiries_in_window(today, DTE_LO, DTE_HI):
         dte = (expiry - today).days
         T = dte / 365
-        ks5 = round(strike_for_delta(spx, T, iv) / 5) * 5
-        kl5 = ks5 - WIDTH_SPX
-        cr = put_price(spx, ks5, T, iv) - put_price(spx, kl5, T, iv)
+        ivf = live_iv_curve(expiry, spx)
+        if ivf is not None:
+            # Real smile: solve and price both legs at their own vol.
+            ks5 = round(solve_delta_live(spx, T, ivf) / 5) * 5
+            kl5 = ks5 - WIDTH_SPX
+            cr = put_price(spx, ks5, T, ivf(ks5)) - put_price(spx, kl5, T, ivf(kl5))
+            src, iv_used = "live chain", ivf(ks5) * 100
+        else:
+            # Fallback only — overstates credit because it ignores skew.
+            ks5 = round(strike_for_delta(spx, T, iv) / 5) * 5
+            kl5 = ks5 - WIDTH_SPX
+            cr = put_price(spx, ks5, T, iv) - put_price(spx, kl5, T, iv)
+            src, iv_used = "MODELLED (flat IV, overstates credit)", iv * 100
         maxloss = (WIDTH_SPX - cr) * 100
         # Backtest showed 30 and 43 DTE returned the same per year, but the
         # longer end was touched far less often (19% vs 25%). So rank on
@@ -286,8 +361,13 @@ def analyse():
             credit=cr * 100, max_loss=maxloss,
             ror=cr * 100 / maxloss * 100,
             cr_per_day=cr * 100 / dte,
+            source=src, iv_used=round(iv_used, 1),
+            breakeven_wr=round(maxloss / (maxloss + cr * 100 * 0.5) * 100, 1),
             score=(cr * 100 / maxloss * 100) + dte * 0.02 + (0.35 if is_monthly_opex(expiry) else 0)))
-    candidates.sort(key=lambda c: -c["score"])
+    # A modelled candidate must never outrank a live-priced one: its credit is
+    # inflated by the missing skew, so it would always win on score and would
+    # be recommending a number the market will not pay.
+    candidates.sort(key=lambda c: (c["source"] != "live chain", -c["score"]))
     for i, c in enumerate(candidates):
         c["best"] = (i == 0)
 
@@ -326,14 +406,23 @@ def format_message(r):
         lines.append(f"<code>sell {best['short']:,.0f}P / buy {best['long']:,.0f}P   ({best['otm']:+.1f}% OTM)</code>")
         lines.append(f"<code>credit ~${best['credit']:,.0f}   max loss ~${best['max_loss']:,.0f}   "
                      f"return {best['ror']:.1f}%</code>")
+        if best.get("breakeven_wr") is not None:
+            lines.append(f"<code>needs {best['breakeven_wr']:.1f}% wins to break even</code>")
+        if best.get("source") == "live chain":
+            lines.append(f"<i>priced off the live chain, IV {best['iv_used']:.1f}% "
+                         f"at the short strike</i>")
+        else:
+            lines.append("<i>⚠️ no live chain for this expiry — modelled at flat IV, "
+                         "which overstates the credit by roughly a quarter</i>")
         lines.append("")
         others = [c for c in r["candidates"] if not c["best"]]
         if others:
             lines.append(f"<i>Others in the {DTE_LO}-{DTE_HI} DTE window:</i>")
             for c in sorted(others, key=lambda x: x["dte"]):
                 tag = " ·mth" if c["monthly"] else ""
+                warn = "" if c.get("source") == "live chain" else "  ⚠️modelled"
                 lines.append(f"<code>{c['label']}  {c['dte']:>2}d{tag:<5} {c['short']:,.0f}/{c['long']:,.0f}  "
-                             f"${c['credit']:>4,.0f}  {c['ror']:>4.1f}%</code>")
+                             f"${c['credit']:>4,.0f}  {c['ror']:>4.1f}%</code>{warn}")
             lines.append("")
         lines.append("Close at <b>50% of credit</b>. No stop — the width is the stop.")
         if r["closed"]:
@@ -348,7 +437,10 @@ def format_message(r):
         for nt in notes:
             lines.append(f"<i>· {nt}</i>")
     lines.append("")
-    lines.append("<i>Strikes modelled from SPY×10 — verify in the moomoo .SPX chain.</i>")
+    live = sum(1 for c in r.get("candidates", []) if c.get("source") == "live chain")
+    tot = len(r.get("candidates", []))
+    lines.append(f"<i>Priced from the live SPY chain ×10 ({live}/{tot} expiries) — "
+                 f"verify the bid/ask in the moomoo .SPX chain before sending.</i>")
     return "\n".join(lines)
 
 
