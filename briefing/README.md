@@ -28,35 +28,6 @@ tools, produces artefacts and delivers them:
 | `send_email.py` | Delivery via the Resend API, 5 attempts, fail-fast on 4xx |
 | `briefing_watchdog.py` | Catches the case where the briefing is built but never sent |
 
-## What went wrong, and what it taught
-
-Most of the engineering here is failure handling, because an unattended agent
-fails in ways a supervised one does not.
-
-**A hung tool call cost two days.** The agent finished the dashboard, then
-opened a browser preview to look at it. The call never returned. That day's
-email and Telegram were never sent — and the *next* day's run never started,
-because the scheduler will not begin a run while the previous one is alive. One
-optional verification step, placed before delivery, took out two days of
-output. `SKILL.md` now forbids browser previews outright and states the general
-rule: **nothing optional runs before delivery.**
-
-**Retries could not help.** `send_email.py` already retried on failure. It was
-never called — the run died upstream. Retry logic protects against a step that
-fails, not against a step that is never reached. That distinction is why
-`briefing_watchdog.py` exists: it runs separately on a schedule and asks one
-question — *was a briefing built today but not delivered?* — then sends what is
-missing, email and Telegram independently, up to five attempts each. It is
-idempotent, so running it repeatedly is safe.
-
-**Cost is a failure mode.** One run died on an account spend limit before
-producing anything. The watchdog correctly reported it had nothing to deliver.
-An agent that can fail for economic reasons rather than technical ones needs
-that distinction visible in its logs.
-
-**Wall-clock time is not runtime.** Runs varied from 4 seconds to 2.5 hours for
-the same work. The machine was sleeping between wake windows, so the agent got
-CPU in slices. Anything timing-sensitive has to tolerate that.
 
 ## Running it
 
