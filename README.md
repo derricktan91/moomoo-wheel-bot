@@ -234,40 +234,24 @@ reach the machine no matter what it says. `/analyse` and `/news` widen that to
 Guests never reach this path at all: free text is owner-only, because the
 prompt carries the whole portfolio.
 
-**Most of the bot is not AI at all.** 14 of the 16 commands — `/portfolio`,
-`/bb`, `/csp`, `/wheel`, `/spx` and the rest — are plain Python: pull prices
-from the broker, compute a 20-period moving average or a Black-Scholes delta,
-format, send. Bollinger bands have an exact definition; asking a language model
-to compute one would be slower, cost money, and occasionally be wrong.
+### What is and is not an agent here
 
-To be precise about what is and is not agentic here: the free-text path is a
-single-shot text transform — data in, prose out, no tools. `/analyse` and
-`/news` are lightly agentic, since the model chooses and iterates its own
-searches. The genuinely agentic component is **[`briefing/`](briefing/)**, a
-scheduled agent that fetches broker data, decides what to research, renders a
-dashboard and delivers it unattended — and whose interesting engineering is
-almost entirely in how it fails.
+Four things run on a schedule and sixteen commands answer on demand. Only three
+of them involve a model deciding anything, and that split is deliberate.
 
-Three boundaries carry most of the design:
+| | autonomy | why |
+|---|---|---|
+| `/bb` `/quote` `/csp` `/cc` `/leaps` `/wheel` `/spx` `/portfolio` `/account` `/orders` `/watchlist` `/allow` `/guests` `/help` | **none** — plain Python | a 20-period moving average and a Black-Scholes delta have exact answers; a model would be slower, cost money and occasionally be wrong |
+| free-text questions | **model, no tools** | data is fetched first and passed as text. One turn, `--tools ""`. It cannot go and get more — it is a writer working from a report |
+| `/analyse` `/news` | **agentic** | given only a ticker list and web search, the model chooses what to look up, reads the result and searches again. Python never knows in advance what it will fetch |
+| BB scan · SPX signal (scheduled) | **none** | automatic, but arithmetic. Automation is what *triggers* a job, not whether it has agency |
+| the daily briefing (scheduled) | **agentic** | decides which of 30 tickers warrant research, queries the broker over Bash, renders a dashboard, writes files, sends email and Telegram. Dozens of steps, most chosen at runtime |
 
-**The chat-id gate** is the only ingress. Guests reach eight market-data
-commands; everything touching the account — and all free-text, which would
-otherwise put the full portfolio into an LLM prompt — is owner-only. Unknown
-ids are logged and dropped, which doubles as how you discover your own chat id
-on first run.
-
-**The subprocess boundary** exists because the bot handles messages serially
-and the broker API blocks indefinitely on some instruments. Chain and signal
-work runs in child processes under a hard timeout, so a stalled call returns an
-error instead of freezing every other command.
-
-**The supervisor boundary.** The bot exits after N consecutive poll failures
-rather than retrying inside a process whose sockets are already dead, and
-`launchd` restarts it. Scheduled scans run as their own processes, so the
-scanner keeps working even while the bot is down.
-
-Every path to the broker is read-only — there is no order-placing call anywhere
-in the repository.
+The useful distinction is not "does it use AI" but **who decides the next
+action** — fixed code, or a model reacting to what it just found. By that test
+most of this repo is deliberately not agentic, and the engineering worth
+looking at is [`briefing/`](briefing/), where an agent runs unattended and the
+interesting problems are all failure modes.
 
 ---
 
