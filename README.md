@@ -297,10 +297,29 @@ may prompt another. That loop — act, observe, decide, act again — is the who
 difference between this and the scheduled Bollinger scan, which runs just as
 automatically and decides nothing.
 
-The watchdog is deliberately **outside** the agent. It is fixed code asking one
-question on a timer, because a guard that depends on the thing it guards is not
-a guard: when the agent wedged, it was the agent's own retry logic that never
-ran.
+**Why the second box.** `briefing_watchdog.py` is a small separate program on
+its own timer. It never talks to the agent. Three times each morning it looks
+at two things on disk — is there a dashboard dated today, and do the logs show
+it was emailed and pushed? If it was built but not sent, it sends it. Most days
+it prints "already delivered, nothing to do" and exits.
+
+That exists because of a specific failure. The send step already retried five
+times on error, but that retry lives *inside* the agent's own run:
+
+```
+09:13:46   dashboard written
+09:13:59   agent opens a browser preview to check it  ← never returns
+           send_email.py is never reached, so its five retries never happen
+```
+
+Retrying protects you when a step **fails**. It does nothing when a step is
+never **reached**. And because the hung run kept holding its slot, the next
+day's briefing never started either — one optional tool call cost two days.
+
+The general shape: a safety net inside the thing it protects shares that
+thing's failure modes. When the run wedges, so does its retry logic. The
+checker can help precisely because it depends on nothing but the files, which
+is also why it is deliberately dumb — fixed code, no model, no cleverness.
 
 ---
 

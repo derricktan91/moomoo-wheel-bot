@@ -30,7 +30,7 @@ See the diagram in the [root README](../#the-agent-loop) — kept there so it is
 |---|---|
 | `SKILL.md` | The agent's prompt. This *is* the program. |
 | `send_email.py` | Delivery via the Resend API, 5 attempts, fail-fast on 4xx |
-| `briefing_watchdog.py` | Catches the case where the briefing is built but never sent |
+| `briefing_watchdog.py` | Separate timer that re-sends a briefing which was built but never delivered |
 
 
 ## Running it
