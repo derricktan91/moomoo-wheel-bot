@@ -245,7 +245,7 @@ of them involve a model deciding anything, and that split is deliberate.
 | free-text questions | **model, no tools** | data is fetched first and passed as text. One turn, `--tools ""`. It cannot go and get more — it is a writer working from a report |
 | `/analyse` `/news` | **agentic** | given only a ticker list and web search, the model chooses what to look up, reads the result and searches again. Python never knows in advance what it will fetch |
 | BB scan · SPX signal (scheduled) | **none** | automatic, but arithmetic. Automation is what *triggers* a job, not whether it has agency |
-| the daily briefing (scheduled) | **agentic** | decides which of 30 tickers warrant research, queries the broker over Bash, renders a dashboard, writes files, sends email and Telegram. Dozens of steps, most chosen at runtime |
+| the daily briefing (scheduled) — [diagram](briefing/#the-loop) | **agentic** | decides which of 30 tickers warrant research, queries the broker over Bash, renders a dashboard, writes files, sends email and Telegram. Dozens of steps, most chosen at runtime |
 
 The useful distinction is not "does it use AI" but **who decides the next
 action** — fixed code, or a model reacting to what it just found. By that test
