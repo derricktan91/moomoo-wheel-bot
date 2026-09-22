@@ -205,7 +205,7 @@ flowchart LR
 The LLM sits **behind** the data layer, not in front of it. A question like
 "how risky is my PLTR call?" is answered by fetching positions and quotes from
 the broker first, then handing Claude that text. It runs with the tool allow-list set to empty (`--tools ""`) — no
-shell, no filesystem, no network of its own — so a Telegram message cannot
+shell, no filesystem, no network of its own so a Telegram message cannot
 reach the machine no matter what it says. `/analyse` and `/news` widen that to
 `WebSearch,WebFetch` only, never `Bash`, `Write` or `Edit`.
 
