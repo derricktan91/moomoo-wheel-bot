@@ -304,44 +304,6 @@ ran.
 
 ---
 
-## The part I'd point at first
-
-I built a backtest for an SPX put credit spread. It reported roughly
-**+$892/year**. I did not believe the win rate, so I audited it and found two
-defects in my own model:
-
-The corrected pricing is now in the signal itself: `spx_signal.py` pulls the
-live SPY chain per expiry, builds the real volatility smile, solves for the
-0.20-delta strike using the vol *at that strike*, and prices both legs at their
-own IV. On 2026-09-22 that was the difference between a modelled $504 credit
-and a real $314. It also reports the win rate the spread needs to break even —
-93.3% for that contract — which is the number that actually decides the trade.
-If a chain is unavailable it falls back to the flat-IV model, labels the
-candidate `⚠️modelled`, and is forbidden from ranking it first, since an
-inflated credit would otherwise always win on score.
-
-1. **Expiries never settled.** The hold loop broke on the final day *before*
-   reaching the settlement branch, so every trade exited at full credit.
-   Losses were structurally invisible — the backtest reported a 100% win rate
-   in every volatility regime, which is what gave it away.
-
-2. **Flat implied volatility ignored skew.** Both legs were priced at one IV.
-   Real chains price the further-OTM long leg *higher*, and on a 25-wide spread
-   that differential is worth ~$215 — about 37% of the credit. Checked against
-   a live chain, the model overstated credits by 26%.
-
-Corrected, the same strategy returns **−$268/year**: a 93.0% win rate against a
-92.8% breakeven, which is statistically indistinguishable from zero. The
-apparent edge was the entire variance risk premium, handed back through skew.
-
-I stopped trading the strategy. The harness that produced the negative result
-is in `spx_signal.py`.
-
-The general lesson is in the code now: a high win rate is not an edge. At a
-12.9:1 loss-to-win ratio you need to win 92.8% of the time just to break even,
-and you cannot measure your own win rate to that precision.
-
----
 
 ## Engineering notes
 
