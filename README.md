@@ -176,14 +176,14 @@ flowchart LR
     tg["Telegram"] --> gate{"chat-id<br/>gate"}
     gate -- "unknown" --> drop["dropped<br/><i>id echoed, owner pinged</i>"]
     gate -- "guest<br/>market data only" --> bot
-    gate -- "owner<br/>everything" --> bot["<b>bot</b><br/>serial message loop"]
+    gate -- "owner<br/>everything" --> bot["<b>bot</b><br/>deterministic Python<br/><i>14 of 16 commands<br/>never touch a model</i>"]
 
     bot -- "subprocess<br/>+ timeout" --> chains["option chains"]
     bot --> opend[("moomoo OpenD<br/><b>read only</b>")]
     chains --> opend
     scan["scheduled scans<br/>every 30 min"] --> opend
 
-    bot -- "owner only<br/>data fetched first,<br/>passed as <b>text</b>" --> claude["<b>Claude CLI</b><br/>tools disabled<br/><i>no shell · no files · no broker</i>"]
+    bot -- "/analyse · /news · free text<br/>owner only, data fetched first,<br/>passed as <b>text</b>" --> claude["<b>Claude CLI</b><br/>tools disabled<br/><i>no shell · no files · no broker</i>"]
     claude -- "answer" --> bot
 
     launchd["launchd"] -. "restarts on<br/>fail-fast exit" .-> bot
@@ -212,6 +212,12 @@ reach the machine no matter what it says. `/analyse` and `/news` widen that to
 
 Guests never reach this path at all: free text is owner-only, because the
 prompt carries the whole portfolio.
+
+**Most of the bot is not AI at all.** 14 of the 16 commands — `/portfolio`,
+`/bb`, `/csp`, `/wheel`, `/spx` and the rest — are plain Python: pull prices
+from the broker, compute a 20-period moving average or a Black-Scholes delta,
+format, send. Bollinger bands have an exact definition; asking a language model
+to compute one would be slower, cost money, and occasionally be wrong.
 
 To be precise about what is and is not agentic here: the free-text path is a
 single-shot text transform — data in, prose out, no tools. `/analyse` and
