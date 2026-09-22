@@ -19,7 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import bb_telegram_alert as bb          # noqa: E402
 import telegram_bot as tb               # noqa: E402
 
-OWNER = "560949139"
+OWNER = "100000001"
 GUEST = "111222333"
 
 ACCOUNT_COMMANDS = ["/portfolio", "/p", "/account", "/orders", "/cc SOFI"]
