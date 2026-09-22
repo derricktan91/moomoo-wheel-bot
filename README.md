@@ -20,6 +20,7 @@ this repository.**
 | `spx_signal.py` | Index credit-spread entry signal with Black-Scholes strike solving |
 | `wheel_analysis.py` | Entry-filter evaluation for a single ticker |
 | `portfolio_telegram_briefing.py` | Daily position and risk summary |
+| `briefing/` | **The agentic part** — a scheduled agent that researches, renders and delivers a daily briefing unattended |
 
 ### Bot commands
 
@@ -211,6 +212,14 @@ reach the machine no matter what it says. `/analyse` and `/news` widen that to
 
 Guests never reach this path at all: free text is owner-only, because the
 prompt carries the whole portfolio.
+
+To be precise about what is and is not agentic here: the free-text path is a
+single-shot text transform — data in, prose out, no tools. `/analyse` and
+`/news` are lightly agentic, since the model chooses and iterates its own
+searches. The genuinely agentic component is **[`briefing/`](briefing/)**, a
+scheduled agent that fetches broker data, decides what to research, renders a
+dashboard and delivers it unattended — and whose interesting engineering is
+almost entirely in how it fails.
 
 Three boundaries carry most of the design:
 
