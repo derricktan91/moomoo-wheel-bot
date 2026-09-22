@@ -324,6 +324,36 @@ is also why it is deliberately dumb — fixed code, no model, no cleverness.
 ---
 
 
+## The part I'd point at first
+
+I built a backtest for an SPX put credit spread. It reported roughly
+**+$892/year**. The win rate looked too clean, so I audited it and found two
+defects in my own model:
+
+1. **Expiries never settled.** The hold loop broke on the final day *before*
+   reaching the settlement branch, so every trade exited at full credit. Losses
+   were structurally invisible — it reported a 100% win rate in every
+   volatility regime, which is what gave it away.
+
+2. **Flat implied volatility ignored skew.** Both legs were priced at one IV.
+   Real chains price the further-OTM long leg *higher*, and on a 25-wide spread
+   that differential is worth about a third of the credit. Against a live
+   chain, the model overstated credits by 26%.
+
+Corrected, the same strategy returns **−$268/year**: a 93.0% win rate against a
+92.8% breakeven, which is statistically indistinguishable from zero. The
+apparent edge was the volatility premium, handed straight back through skew.
+
+I stopped trading it. The harness that produced the negative result is in
+`spx_signal.py`, and `demo.py` reproduces the pricing difference in a few
+seconds.
+
+The general lesson is in the code now: **a high win rate is not an edge.** At a
+12.9:1 loss-to-win ratio you need to win 92.8% of the time just to break even,
+and you cannot measure your own win rate to that precision.
+
+---
+
 ## Engineering notes
 
 **Self-healing process supervision.** The bot once stopped responding for eight
