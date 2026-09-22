@@ -182,6 +182,9 @@ flowchart LR
     chains --> opend
     scan["scheduled scans<br/>every 30 min"] --> opend
 
+    bot -- "owner only<br/>data fetched first,<br/>passed as <b>text</b>" --> claude["<b>Claude CLI</b><br/>--tools &quot;&quot;<br/><i>no shell · no files · no broker</i>"]
+    claude -- "answer" --> bot
+
     launchd["launchd"] -. "restarts on<br/>fail-fast exit" .-> bot
     launchd --> scan
 
@@ -190,12 +193,24 @@ flowchart LR
     classDef core fill:#ecfdf5,stroke:#059669,color:#022c22
     classDef iso fill:#fff1f2,stroke:#e11d48,color:#4c0519
     classDef drop fill:#e5e7eb,stroke:#9ca3af,color:#374151
+    classDef ai fill:#f5f3ff,stroke:#7c3aed,color:#2e1065
     class tg,opend,launchd,scan ext
     class gate gate
     class bot core
     class chains iso
     class drop drop
+    class claude ai
 ```
+
+The LLM sits **behind** the data layer, not in front of it. A question like
+"how risky is my PLTR call?" is answered by fetching positions and quotes from
+the broker first, then handing Claude that text. It runs with `--tools ""` — no
+shell, no filesystem, no network of its own — so a Telegram message cannot
+reach the machine no matter what it says. `/analyse` and `/news` widen that to
+`WebSearch,WebFetch` only, never `Bash`, `Write` or `Edit`.
+
+Guests never reach this path at all: free text is owner-only, because the
+prompt carries the whole portfolio.
 
 Three boundaries carry most of the design:
 
