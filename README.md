@@ -10,6 +10,27 @@ this repository.**
 
 ---
 
+## Try it without a brokerage account
+
+Most of this needs a funded moomoo account, OpenD running locally and a
+Telegram bot. Three things do not:
+
+```bash
+pip install -r requirements.txt -r requirements-dev.txt
+
+python3 demo.py    # the strategy maths on synthetic prices — no network
+pytest -q          # 26 access-control tests, 0.04s, no broker
+python3 briefing/briefing_watchdog.py   # the agent's delivery check, runs anywhere
+```
+
+`demo.py` walks the entry filter, the volatility-adjusted strike rule,
+Black-Scholes delta solving, and finishes on the result that killed the index
+strategy — flat-IV pricing showing an $511 credit against $326 once skew is
+included, which moves the breakeven win rate from 88.6% to 93.0% and the
+expected value to zero.
+
+---
+
 ## What it does
 
 | Component | Purpose |
