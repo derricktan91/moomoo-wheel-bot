@@ -207,7 +207,7 @@ flowchart LR
     bot -- "/analyse · /news · free text<br/>owner only, data fetched first,<br/>passed as <b>text</b>" --> claude["<b>Claude CLI</b><br/>tools disabled<br/><i>no shell · no files · no broker</i>"]
     claude -- "answer" --> bot
 
-    launchd["launchd"] -. "restarts on<br/>fail-fast exit" .-> bot
+    launchd["launchd<br/><i>macOS cron</i>"] -. "restarts on<br/>fail-fast exit" .-> bot
     launchd --> scan
 
     classDef ext fill:#eef2ff,stroke:#6366f1,color:#1e1b4b
@@ -233,6 +233,14 @@ reach the machine no matter what it says. `/analyse` and `/news` widen that to
 
 Guests never reach this path at all: free text is owner-only, because the
 prompt carries the whole portfolio.
+
+**`launchd` is macOS's cron.** It does two jobs here: it keeps the bot process
+alive (restarting it 15 seconds after any exit, which is why the bot is written
+to fail fast rather than retry internally), and it runs the scanner on a clock —
+every 30 minutes through US market hours. Each scan is a fresh process that
+connects to the broker itself, computes, sends any alert, and exits. On Linux
+these are a systemd service with `Restart=always` and a timer, or two cron
+entries.
 
 ### What is and is not an agent here
 
