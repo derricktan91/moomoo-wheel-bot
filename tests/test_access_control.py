@@ -26,7 +26,7 @@ ACCOUNT_COMMANDS = ["/portfolio", "/p", "/account", "/orders", "/cc SOFI"]
 ADMIN_COMMANDS   = ["/allow 999", "/revoke 999", "/guests"]
 FREE_TEXT        = ["should I buy PLTR?", "what is my P&L", "hello"]
 MARKET_COMMANDS  = ["/help", "/start", "/quote NVDA", "/bb", "/watchlist",
-                    "/wheel NVDA", "/csp NVDA", "/leaps NVDA", "/spx"]
+                    "/wheel NVDA", "/csp NVDA", "/leaps NVDA", "/walls NVDA", "/spx"]
 
 
 @pytest.fixture
@@ -50,6 +50,7 @@ def bot(tmp_path, monkeypatch):
     monkeypatch.setattr(tb, "quote_block", lambda tickers: [])
     monkeypatch.setattr(tb, "watchlist_block", lambda: "watchlist")
     monkeypatch.setattr(tb, "chain", lambda cfg, cid, tk, side: sent.append((cid, f"chain {tk} {side}")))
+    monkeypatch.setattr(tb, "walls", lambda cfg, cid, tk: sent.append((cid, f"walls {tk}")))
     monkeypatch.setattr(tb, "wheel", lambda cfg, cid, tk: sent.append((cid, f"wheel {tk}")))
     monkeypatch.setattr(tb, "spx_check", lambda cfg, cid: sent.append((cid, "spx")))
     tb.GUESTS.clear()

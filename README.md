@@ -35,9 +35,10 @@ expected value to zero.
 
 | Component | Purpose |
 |---|---|
-| `telegram_bot.py` | 16-command bot: positions, P&L, option chains, technicals, guest management |
+| `telegram_bot.py` | 17-command bot: positions, P&L, option chains, technicals, guest management |
 | `bb_telegram_alert.py` | Bollinger/RSI scan across 30 tickers, every 30 min during market hours |
 | `option_chain.py` | Chain scanner for cash-secured puts, covered calls and LEAPS |
+| `walls.py` | Put/call walls: open interest summed per strike across the next 45 days of expiries |
 | `spx_signal.py` | Index credit-spread entry signal with Black-Scholes strike solving |
 | `wheel_analysis.py` | Entry-filter evaluation for a single ticker |
 | `portfolio_telegram_briefing.py` | Daily position and risk summary |
@@ -50,6 +51,7 @@ expected value to zero.
 /allow /revoke /guests           grant or remove guest access (owner only)
 /quote /bb /watchlist            technicals
 /csp /cc /leaps /wheel           option chains, filtered by delta and DTE
+/walls                           put/call walls by open interest
 /spx                             index spread signal
 /analyse /news                   research
 ```
@@ -197,7 +199,7 @@ flowchart LR
     tg["Telegram"] --> gate{"chat-id<br/>gate"}
     gate -- "unknown" --> drop["dropped<br/><i>id echoed, owner pinged</i>"]
     gate -- "guest<br/>market data only" --> bot
-    gate -- "owner<br/>everything" --> bot["<b>bot</b><br/>deterministic Python<br/><i>14 of 16 commands<br/>never touch a model</i>"]
+    gate -- "owner<br/>everything" --> bot["<b>bot</b><br/>deterministic Python<br/><i>15 of 17 commands<br/>never touch a model</i>"]
 
     bot -- "subprocess<br/>+ timeout" --> chains["option chains"]
     bot --> opend[("moomoo OpenD<br/><b>read only</b>")]
@@ -244,12 +246,12 @@ entries.
 
 ### What is and is not an agent here
 
-Four things run on a schedule and sixteen commands answer on demand. Only three
+Four things run on a schedule and seventeen commands answer on demand. Only three
 of them involve a model deciding anything, and that split is deliberate.
 
 | | autonomy | why |
 |---|---|---|
-| `/bb` `/quote` `/csp` `/cc` `/leaps` `/wheel` `/spx` `/portfolio` `/account` `/orders` `/watchlist` `/allow` `/guests` `/help` | **none** — plain Python | a 20-period moving average and a Black-Scholes delta have exact answers; a model would be slower, cost money and occasionally be wrong |
+| `/bb` `/quote` `/csp` `/cc` `/leaps` `/walls` `/wheel` `/spx` `/portfolio` `/account` `/orders` `/watchlist` `/allow` `/guests` `/help` | **none** — plain Python | a 20-period moving average and a Black-Scholes delta have exact answers; a model would be slower, cost money and occasionally be wrong |
 | free-text questions | **model, no tools** | data is fetched first and passed as text. One turn, `--tools ""`. It cannot go and get more — it is a writer working from a report |
 | `/analyse` `/news` | **agentic** | given only a ticker list and web search, the model chooses what to look up, reads the result and searches again. Python never knows in advance what it will fetch |
 | BB scan · SPX signal (scheduled) | **none** | automatic, but arithmetic. Automation is what *triggers* a job, not whether it has agency |

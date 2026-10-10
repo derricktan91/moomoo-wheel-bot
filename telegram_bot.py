@@ -77,6 +77,7 @@ HELP = """<b>🤖 moomoo assistant</b>
 /csp NVDA — put chain, .20-.30 delta, with IV/RV + OI
 /cc SOFI — call chain, checked against your cost basis
 /leaps NVDA — LEAPS calls, 365+ DTE, ~0.70 delta
+/walls NVDA — put/call walls: biggest open-interest strikes
 /spx — SPX put-spread entry check (vol, day, strike)
 /analyse NVDA — full research report
 /news — macro, geopolitics, your names
@@ -124,6 +125,7 @@ BOT_COMMANDS = [
     ("csp",       "Put chain for a CSP — /csp NVDA"),
     ("cc",        "Call chain for a covered call — /cc SOFI"),
     ("leaps",     "LEAPS calls 365+ DTE, ~0.70 delta — /leaps NVDA"),
+    ("walls",     "Put/call walls by open interest — /walls NVDA"),
     ("spx",       "SPX put-spread entry check: vol regime, day, strike"),
     ("guests",    "List guest chat ids"),
     ("allow",     "Grant guest access — /allow 123456789"),
@@ -139,7 +141,7 @@ BOT_COMMANDS = [
 # Claude token stays owner-only. Free-form text is owner-only too: it falls
 # through to handle_question(), which feeds the whole portfolio to Claude.
 GUEST_COMMANDS = frozenset({"start", "help", "quote", "bb", "watchlist",
-                            "wheel", "spx", "csp", "leaps"})
+                            "wheel", "spx", "csp", "leaps", "walls"})
 GUEST_BOT_COMMANDS = [(c, d) for c, d in BOT_COMMANDS if c in GUEST_COMMANDS]
 
 GUEST_HELP = (
@@ -147,6 +149,7 @@ GUEST_HELP = (
     "/quote NVDA — price, RSI, Bollinger bands\n"
     "/bb — Bollinger scan (or /bb SOFI)\n"
     "/wheel NVDA — CSP entry check + live strikes\n"
+    "/walls NVDA — put/call walls by open interest\n"
     "/spx — SPX put-spread entry check\n"
     "/watchlist — tracked tickers\n"
     "/help — this message\n\n"
@@ -518,6 +521,60 @@ def spx_check(cfg, chat_id):
         reply(cfg, chat_id, f"⚠️ SPX check timed out after {WHEEL_TIMEOUT}s — is OpenD up?")
     except Exception as e:
         reply(cfg, chat_id, f"⚠️ SPX check failed: {str(e)[:300]}")
+
+
+def walls(cfg, chat_id, ticker):
+    """Put/call walls: the strikes holding the most open interest.
+
+    Subprocess + timeout, same as chain(): one OpenD chain call per expiry,
+    paced for the rate limit, so it takes ~20s and must not block the loop.
+    """
+    reply(cfg, chat_id, f"🧱 Scanning <b>{ticker}</b> open interest (~20s)…")
+    try:
+        p_ = subprocess.run(
+            [sys.executable, str(Path(__file__).parent / "walls.py"), ticker],
+            capture_output=True, text=True, timeout=WHEEL_TIMEOUT)
+        r = None
+        for line in reversed(p_.stdout.splitlines()):
+            line = line.strip()
+            if line.startswith("{"):
+                try:
+                    r = json.loads(line)
+                    break
+                except ValueError:
+                    continue
+        if r is None:
+            raise ValueError(f"no JSON in output: {p_.stderr[-200:]}")
+    except subprocess.TimeoutExpired:
+        reply(cfg, chat_id, f"⚠️ {ticker} walls timed out after {WHEEL_TIMEOUT}s — is OpenD up?")
+        return
+    except Exception as e:
+        reply(cfg, chat_id, f"⚠️ walls failed: {html.escape(str(e))[:300]}")
+        return
+    if "error" in r:
+        reply(cfg, chat_id, f"⚠️ {html.escape(r['error'])}")
+        return
+
+    def rows(ws):
+        if not ws:
+            return "  none in range\n"
+        return "".join(f"  ${w['strike']:g}  ·  {w['oi']:,} OI  ·  {w['dist_pct']:+.1f}%\n"
+                       for w in ws)
+
+    def d(s):
+        return datetime.strptime(s, "%Y-%m-%d").strftime("%b %-d")
+
+    msg = (f"<b>🧱 {r['ticker']} walls</b> — ${r['spot']:,.2f}\n"
+           f"<i>{r['n_expiries']} expiries, {d(r['first_expiry'])} → {d(r['last_expiry'])}</i>\n\n"
+           f"<b>🔺 Call walls</b> (above price)\n{rows(r['call_walls'])}\n"
+           f"<b>🔻 Put walls</b> (below price)\n{rows(r['put_walls'])}\n")
+    if r.get("peak_gamma"):
+        msg += f"Peak gamma: <b>${r['peak_gamma']:g}</b>\n"
+    if r.get("pc_ratio") is not None:
+        msg += f"Put/call OI: <b>{r['pc_ratio']:.2f}</b> ({r['put_oi']:,} / {r['call_oi']:,})\n"
+    msg += ("\n<i>Open interest is from the last close. Walls show where contracts "
+            "sit, not guaranteed support or resistance.</i>")
+    reply(cfg, chat_id, msg)
 
 
 def chain(cfg, chat_id, ticker, side):
@@ -995,6 +1052,16 @@ def handle(cfg, chat_id, text, guest=False):
             GUESTS.clear(); GUESTS.update(gs)
             log(f"REVOKE {target} (by owner)")
             reply(cfg, chat_id, f"🚫 <code>{target}</code> revoked. {len(gs)} guest(s) left.")
+    elif cmd == "walls":
+        parts = t.split()
+        if len(parts) < 2:
+            reply(cfg, chat_id, "Give me a ticker — e.g. <code>/walls NVDA</code>")
+            return
+        tk = re.sub(r"[^A-Za-z.]", "", parts[1]).upper()
+        if not tk:
+            reply(cfg, chat_id, f"'{html.escape(parts[1])[:20]}' is not a ticker.")
+            return
+        walls(cfg, chat_id, tk)
     elif cmd in ("csp", "cc", "leaps"):
         parts = t.split()
         if len(parts) < 2:
