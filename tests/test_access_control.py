@@ -19,6 +19,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import bb_telegram_alert as bb          # noqa: E402
 import telegram_bot as tb               # noqa: E402
 
+REAL_CHAIN = tb.chain                   # the fixture stubs it; one test needs the real one
+
 OWNER = "100000001"
 GUEST = "111222333"
 
@@ -49,9 +51,8 @@ def bot(tmp_path, monkeypatch):
     # anyone else can run.
     monkeypatch.setattr(tb, "quote_block", lambda tickers: [])
     monkeypatch.setattr(tb, "watchlist_block", lambda: "watchlist")
-    monkeypatch.setattr(tb, "chain", lambda cfg, cid, tk, side: sent.append((cid, f"chain {tk} {side}")))
+    monkeypatch.setattr(tb, "chain", lambda cfg, cid, tk, side, guest=False: sent.append((cid, f"chain {tk} {side}")))
     monkeypatch.setattr(tb, "walls", lambda cfg, cid, tk: sent.append((cid, f"walls {tk}")))
-    monkeypatch.setattr(tb, "wheel", lambda cfg, cid, tk: sent.append((cid, f"wheel {tk}")))
     monkeypatch.setattr(tb, "spx_check", lambda cfg, cid: sent.append((cid, "spx")))
     tb.GUESTS.clear()
     tb.GUESTS.add(GUEST)
@@ -151,3 +152,29 @@ def test_allow_rejects_junk_and_self(bot):
     assert "not a chat id" in sent[-1][1]
     sent.clear(); tb.handle(cfg, OWNER, f"/allow {OWNER}")
     assert "your own chat id" in sent[-1][1].lower()
+
+
+# --- merged commands -------------------------------------------------------
+
+def test_wheel_is_an_alias_of_csp(bot):
+    cfg, sent, _ = bot
+    sent.clear()
+    tb.handle(cfg, OWNER, "/wheel NVDA")
+    assert sent[-1][1] == "chain NVDA put"
+
+
+def test_csp_hides_the_owner_position_from_guests(bot, monkeypatch):
+    # /csp is a guest command, but its owner view ends with the live position.
+    cfg, sent, _ = bot
+    chain_json = ('{"ticker": "AMKR", "spot": 43.0, "rv30": 56.0, "delta_lo": 0.2, "delta_hi": 0.3, '
+                  '"oi_min": 100, "band": [{"expiry": "2026-11-20", "dte": 35, "strike": 39.0, '
+                  '"premium": 2.05, "dollars": 205, "delta": -0.29, "iv": 76.0, "iv_rv": 1.3, "oi": 250, '
+                  '"otm": -9.6, "collateral": 3900.0, "ann": 54.8}]}')
+    monkeypatch.setattr(tb.subprocess, "run",
+                        lambda *a, **k: type("P", (), {"stdout": chain_json, "stderr": ""})())
+    monkeypatch.setattr(tb, "position_context", lambda t: "SHORT 1x AMKR $45P")
+    for guest, should_show in ((True, False), (False, True)):
+        sent.clear()
+        REAL_CHAIN(cfg, GUEST if guest else OWNER, "AMKR", "put", guest=guest)
+        shown = "SHORT 1x AMKR" in sent[-1][1]
+        assert shown == should_show, f"guest={guest}: position shown={shown}"

@@ -171,7 +171,6 @@ The defaults encode one person's strategy. The interesting constants:
 | `option_chain.py` → `LEAPS_*` | `0.65-0.75` delta, 365+ DTE, plus a per-ticker override table |
 | `option_chain.py` → `DTE_LO/HI` | `30, 45` |
 | `walls.py` → `MAX_DTE` / `BAND` / `TOP_N` | `45` days of expiries, strikes within `0.30` of spot, top `3` strikes per side |
-| `wheel_analysis.py` → `MIN_DTE/MAX_DTE` | `30, 45` — the floor `/wheel` will quote |
 | `bb_telegram_alert.py` → `BB_PERIOD` | Bollinger lookback, 20 |
 
 None of these are recommendations — they are the parameters one account happens

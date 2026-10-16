@@ -33,7 +33,6 @@ from bb_telegram_alert import (  # noqa: E402
     bollinger_and_rsi, WATCHLIST, BB_PERIOD, LEAPS_PCT_B,
 )
 import portfolio_telegram_briefing as pb  # noqa: E402
-import wheel_analysis as wa  # noqa: E402
 
 
 # Broker entity and OpenD endpoint come from the environment so this runs
@@ -67,14 +66,11 @@ TG_LIMIT = 4000
 HELP = """<b>🤖 moomoo assistant</b>
 
 <b>Commands</b>
-/portfolio — live positions + P/L
-/account — cash, assets, buying power
+/portfolio — positions, P/L, cash, margin
 /watchlist — list the tracked tickers
 /bb — Bollinger scan, whole watchlist
-/bb SOFI — bands for one ticker
-/quote NVDA — price, RSI, bands
-/wheel NVDA — CSP entry check + live strikes
-/csp NVDA — put chain, .20-.30 delta, with IV/RV + OI
+/quote NVDA — price, RSI, bands for one ticker
+/csp NVDA — entry signal + put chain, .20-.30 delta
 /cc SOFI — call chain, checked against your cost basis
 /leaps NVDA — LEAPS calls, 365+ DTE, ~0.70 delta
 /walls NVDA — put/call walls: biggest open-interest strikes
@@ -116,13 +112,11 @@ def api(cfg, method, params=None, timeout=70):
 # short so the menu stays scannable on a phone. Registered once at startup —
 # Telegram stores them server-side, so this survives bot restarts.
 BOT_COMMANDS = [
-    ("portfolio", "Live positions + P/L"),
-    ("account",   "Cash, assets, buying power"),
+    ("portfolio", "Positions, P/L, cash and margin"),
     ("watchlist", "List the tracked tickers"),
-    ("bb",        "Bollinger scan — all, or /bb SOFI"),
+    ("bb",        "Bollinger scan of the whole watchlist"),
     ("quote",     "Price, RSI, bands — /quote NVDA"),
-    ("wheel",     "CSP entry check + live strikes — /wheel NVDA"),
-    ("csp",       "Put chain for a CSP — /csp NVDA"),
+    ("csp",       "Entry signal + put chain for a CSP — /csp NVDA"),
     ("cc",        "Call chain for a covered call — /cc SOFI"),
     ("leaps",     "LEAPS calls 365+ DTE, ~0.70 delta — /leaps NVDA"),
     ("walls",     "Put/call walls by open interest — /walls NVDA"),
@@ -147,8 +141,9 @@ GUEST_BOT_COMMANDS = [(c, d) for c, d in BOT_COMMANDS if c in GUEST_COMMANDS]
 GUEST_HELP = (
     "<b>Market data bot</b>\n\n"
     "/quote NVDA — price, RSI, Bollinger bands\n"
-    "/bb — Bollinger scan (or /bb SOFI)\n"
-    "/wheel NVDA — CSP entry check + live strikes\n"
+    "/bb — Bollinger scan of the watchlist\n"
+    "/csp NVDA — entry signal + put chain\n"
+    "/leaps NVDA — LEAPS calls, 365+ DTE\n"
     "/walls NVDA — put/call walls by open interest\n"
     "/spx — SPX put-spread entry check\n"
     "/watchlist — tracked tickers\n"
@@ -334,21 +329,13 @@ def today_orders():
         ctx.close()
 
 
-def account_block():
-    pos, acc = pb.fetch()
-    total_pl = float(pos["pl_val"].sum())
-    return (
-        "<b>🏦 Account</b>\n\n"
-        f"Total assets     ${float(acc['total_assets']):,.2f}\n"
-        f"Securities       ${float(acc['securities_assets']):,.2f}\n"
-        f"Cash             ${float(acc['cash']):,.2f}\n"
-        f"Buying power     ${float(acc['power']):,.2f}\n"
-        f"Long MV          ${float(acc['long_mv']):,.2f}\n"
-        f"Short MV         ${float(acc['short_mv']):,.2f}\n"
-        f"Unrealized P/L   {pb.money(total_pl)}\n"
-        f"Risk status      {acc['risk_status'] if str(acc['risk_status']) != 'N/A' else acc['risk_level']}\n"
-        f"Maint. margin    ${float(acc['maintenance_margin']):,.2f}"
-    )
+def margin_block(acc):
+    """The account lines /portfolio does not already show."""
+    risk = acc["risk_status"] if str(acc["risk_status"]) != "N/A" else acc["risk_level"]
+    return (f"<b>🏦 Margin</b>\n"
+            f"Buying power     ${float(acc['power']):,.0f}\n"
+            f"Maint. margin    ${float(acc['maintenance_margin']):,.0f}\n"
+            f"Risk status      {risk}")
 
 
 # ------------------------------------------------------------- claude -p ----
@@ -439,70 +426,11 @@ User's question: {text}"""
     reply(cfg, chat_id, answer if answer else f"⚠️ {err}", parse_mode=None)
 
 
-# ----------------------------------------------------------------- wheel ----
-
-def fmt_wheel(r):
-    """Render wheel-entry findings. Reports the rules and the chain; decides nothing."""
-    t = r["ticker"]
-    csp_flag = dict(WATCHLIST).get(t)
-    out = [f"🎡 <b>WHEEL — {t}</b>  ${r['price']:,.2f}", ""]
-
-    # --- entry gate: the documented %B <= 0.50 window -------------------
-    if r["in_zone"]:
-        out.append(f"✅ <b>In entry zone</b> — %B {r['pct_b']:.2f} (rule: ≤ 0.50)")
-    else:
-        out.append(f"⏸️ <b>Outside entry zone</b> — %B {r['pct_b']:.2f} (rule: ≤ 0.50)")
-    out.append(f"    RSI {r['rsi']:.1f} · bands ${r['lower']:,.2f} / ${r['mid']:,.2f} / ${r['upper']:,.2f}")
-    if csp_flag is False:
-        out.append("    ⚠️ tagged <i>context only</i> on your watchlist, not a CSP name")
-    elif csp_flag is None:
-        out.append("    ℹ️ not on your watchlist")
-
-    # --- which strike rule applies -------------------------------------
-    out.append("")
-    out.append(f"📐 <b>Vol {r['vol']*100:.0f}% annualised → {r.get('regime','?').upper()}</b>")
-    out.append(f"    strike rule: {r.get('rule','n/a')}")
-
-    # --- live chain -----------------------------------------------------
-    if not r["candidates"]:
-        out.append("")
-        out.append("📉 No liquid put strikes matched (need OI ≥ 50 and a live bid).")
-        for n in r["notes"]:
-            out.append(f"    {n}")
-    else:
-        cur = None
-        for c in r["candidates"]:
-            if c["expiry"] != cur:
-                cur = c["expiry"]
-                out.append("")
-                out.append(f"<b>📅 {cur}  ({c['dte']}d)</b>")
-            out.append(
-                f"  ${c['strike']:g}  {c['pct_otm']:.1f}% OTM  Δ{c['delta']:+.2f}\n"
-                f"     ${c['credit']:,.0f} credit · {c['ann_pct']:.1f}%/yr · "
-                f"${c['collateral']:,.0f} collateral\n"
-                f"     IV {c['iv']:.0f} · OI {c['oi']:,} · basis if assigned ${c['eff_basis']:,.2f}")
-
-    pos = position_context(t)
-    if pos != "No position held.":
-        out.append("")
-        out.append("<b>📌 Current position</b>")
-        for line in pos.split("\n"):
-            out.append(f"  {line}")
-
-    out.append("")
-    out.append("<i>Your rules applied to live data — credit is bid-side, one contract. "
-               "Earnings dates are not checked here; use /news " + t + ".</i>")
-    return "\n".join(out)
-
-
-# futu logs as "2026-09-06 17:52:00,123 [file.py] ..." — never our own output,
-# which is HTML and always starts with '<' or is blank.
-FUTU_LOG = re.compile(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}")
-
+# ----------------------------------------------------- subprocess runners ----
 
 def spx_check(cfg, chat_id):
-    """SPX bull-put-spread entry scoring. Subprocess for the same reason as
-    /wheel — an OpenD hang must not take the whole bot down."""
+    """SPX bull-put-spread entry scoring. Subprocess so an OpenD hang must not
+    take the whole bot down."""
     reply(cfg, chat_id, "📐 Scoring today's SPX spread setup…")
     try:
         p_ = subprocess.run(
@@ -521,6 +449,30 @@ def spx_check(cfg, chat_id):
         reply(cfg, chat_id, f"⚠️ SPX check timed out after {WHEEL_TIMEOUT}s — is OpenD up?")
     except Exception as e:
         reply(cfg, chat_id, f"⚠️ SPX check failed: {str(e)[:300]}")
+
+
+def entry_signal(ticker, side):
+    """The dual-filter verdict that /wheel used to show, now on /csp and /leaps.
+
+    CSP: %B <= 0.50 or RSI <= 35 is an entry, both is a strong one.
+    LEAPS: only both together counts.
+    """
+    try:
+        q = quote_block([ticker])[0]
+    except Exception:
+        return ""
+    if "error" in q:
+        return ""
+    bb_ok, rsi_ok = q["pct_b"] <= 0.50, q["rsi"] <= 35
+    stats = f"%B {q['pct_b']:.2f} · RSI {q['rsi']:.1f}"
+    if side == "leaps":
+        return (f"💎 <b>LEAPS signal: lower BB + RSI ≤ 35</b> — {stats}" if bb_ok and rsi_ok
+                else f"⏸️ <b>No LEAPS signal</b> — {stats} (needs %B ≤ 0.50 and RSI ≤ 35)")
+    if bb_ok and rsi_ok:
+        return f"🔥 <b>Strong CSP entry: both filters</b> — {stats}"
+    if bb_ok or rsi_ok:
+        return f"✅ <b>CSP entry: {'BB' if bb_ok else 'RSI'} filter</b> — {stats}"
+    return f"⏸️ <b>No CSP entry</b> — {stats} (needs %B ≤ 0.50 or RSI ≤ 35)"
 
 
 def walls(cfg, chat_id, ticker):
@@ -577,10 +529,10 @@ def walls(cfg, chat_id, ticker):
     reply(cfg, chat_id, msg)
 
 
-def chain(cfg, chat_id, ticker, side):
+def chain(cfg, chat_id, ticker, side, guest=False):
     """Render a 30-45 DTE option chain around the .20-.30 delta band.
 
-    Subprocess + timeout for the same reason as /wheel: OpenD's chain call can
+    Subprocess + timeout: OpenD's chain call can
     stall indefinitely on some names and this bot handles messages serially.
     """
     label = {"put": "CSP put", "call": "covered call", "leaps": "LEAPS calls"}[side]
@@ -619,6 +571,10 @@ def chain(cfg, chat_id, ticker, side):
         out.append(f"<i>realised vol {r['rv30']:.0f}% · {note}</i>")
     out.append(f"<i>Δ{r['delta_lo']:.2f}-{r['delta_hi']:.2f} only</i>")
     out.append("")
+    if side in ("put", "leaps"):
+        sig = entry_signal(ticker, side)
+        if sig:
+            out += [sig, ""]
 
     held = r.get("held")
     basis = None
@@ -677,7 +633,8 @@ def chain(cfg, chat_id, ticker, side):
         out.append(line)
         extra = f"<code>ann {b['ann']:.1f}%</code>"
         if b.get("collateral"):
-            extra = f"<code>collateral ${b['collateral']:,.0f}   ann {b['ann']:.1f}%</code>"
+            extra = (f"<code>collateral ${b['collateral']:,.0f}   ann {b['ann']:.1f}%   "
+                     f"basis if assigned ${b['strike'] - b['premium']:,.2f}</code>")
         out.append(extra)
         if b.get("iv_rv") is not None:
             verdict = ("underpaid — IV below realised" if b["iv_rv"] < 0.9
@@ -685,142 +642,13 @@ def chain(cfg, chat_id, ticker, side):
             out.append(f"<code>IV/RV {b['iv_rv']:.2f}</code> — <i>{verdict}</i>")
         out.append("")
 
+    if side == "put" and not guest:
+        # Live account data: owner only, even though guests can run /csp.
+        pos = position_context(ticker)
+        if pos != "No position held.":
+            out += ["<b>📌 Current position</b>", html.escape(pos), ""]
     out.append("<i>Last-traded prices; verify the live bid/ask before sending an order.</i>")
     reply(cfg, chat_id, "\n".join(out).rstrip())
-
-
-def wheel(cfg, chat_id, ticker):
-    reply(cfg, chat_id, f"🎡 Checking <b>{ticker}</b> for wheel entry…")
-    # Subprocess + hard timeout: OpenD's option-chain call blocks forever on
-    # some index ETFs (QQQ), and this bot handles messages serially — an
-    # in-process hang would take the whole bot down until it was restarted.
-    try:
-        p_ = subprocess.run(
-            [sys.executable, str(Path(__file__).parent / "wheel_analysis.py"), ticker],
-            capture_output=True, text=True, timeout=WHEEL_TIMEOUT)
-        # futu logs to stdout, so the JSON is not reliably the last line
-        r = None
-        for line in reversed(p_.stdout.splitlines()):
-            line = line.strip()
-            if line.startswith("{"):
-                try:
-                    r = json.loads(line)
-                    break
-                except ValueError:
-                    continue
-        if r is None:
-            raise ValueError("no JSON in wheel_analysis output")
-    except subprocess.TimeoutExpired:
-        reply(cfg, chat_id,
-              f"⚠️ Timed out reading {ticker}'s option chain after {WHEEL_TIMEOUT}s.\n"
-              "Index ETFs (QQQ etc.) have chains OpenD won't return — try a single stock.")
-        return
-    except Exception as e:
-        reply(cfg, chat_id, f"⚠️ Wheel check failed: {html.escape(str(e))[:300]}")
-        return
-    if "error" in r:
-        reply(cfg, chat_id, f"⚠️ {r['error']}")
-        return
-    reply(cfg, chat_id, fmt_wheel(r))
-
-
-# ------------------------------------------------------------------ news ----
-
-NEWS_PROMPT = """Produce a market news digest for a retail options trader, current
-as of {when} (US Eastern market context).
-
-FORMAT — follow exactly:
-- PLAIN TEXT ONLY. No markdown, no HTML, no **bold**, no # headings, no tables.
-- NO markdown links. Never write [title](url). Never paste a raw URL.
-- Output ONLY the digest — no preamble, no sign-off, and no commentary about
-  delivery, tooling, or what you can or cannot do. Your output is piped straight
-  to the reader unmodified; anything that isn't the digest is a defect.
-- Under 3500 characters total.
-- Use these sections, in this order, with these exact emoji markers:
-
-🌍 MARKET NEWS — {when}
-
-📉 TAPE
-<index levels and moves: S&P 500, Nasdaq, Dow. Then VIX, US 10-year yield,
- dollar index, oil, gold. One compact line each or grouped — numbers, not adjectives.>
-
-🏦 MACRO & POLICY
-<2-4 bullets: Fed/rate expectations, latest inflation or jobs prints, central
- bank moves, fiscal or regulatory news that moved markets>
-
-🌐 GEOPOLITICS
-<1-3 bullets: only items with a real market transmission channel — trade,
- tariffs, conflict affecting energy or supply chains, sanctions, elections.
- Skip if nothing material; write "Nothing market-moving." >
-
-⚡ SECTOR MOVERS
-<2-4 bullets: what drove the big sectors, especially semis/AI infrastructure,
- memory, software, fintech>
-
-📌 YOUR NAMES
-<Only headlines from the last 48h that touch these tickers: {tickers}
- One line per ticker that actually has news. Name the ticker first. If none of
- them had news, write "No stock-specific headlines.">
-
-📅 NEXT UP
-<Upcoming catalysts in the next 1-2 weeks: economic releases with dates, Fed
- meetings, notable earnings — especially for the tickers above>
-
-RULES:
-- Search the web. Report only what you can verify, and prefer items from the
-  last 24-48 hours. Include the date for anything older.
-- Never invent a number, a level, or a headline. If you cannot verify something,
-  omit it rather than estimating.
-- Report facts and what analysts/markets are pricing. Do NOT tell the reader to
-  buy, sell, hedge, or adjust anything, and do NOT suggest position sizing.
-- Be dense. This is a briefing, not an essay.
-"""
-
-
-TICKER_NEWS_PROMPT = """Produce a recent-news digest for {ticker}, current as of {when}.
-
-This is a NEWS digest, not a valuation report — focus on what has actually
-happened lately and what is scheduled next. Do not assess whether the stock is
-cheap or expensive.
-
-FORMAT — follow exactly:
-- PLAIN TEXT ONLY. No markdown, no HTML, no **bold**, no # headings, no tables.
-- NO markdown links. Never write [title](url). Never paste a raw URL.
-- Output ONLY the digest — no preamble, no sign-off, and no commentary about
-  delivery, tooling, or what you can or cannot do. Your output is piped straight
-  to the reader unmodified; anything that isn't the digest is a defect.
-- Under 3000 characters total.
-- Use these sections, in this order, with these exact emoji markers:
-
-🗞️ {ticker} NEWS — {when}
-<one line: current price and recent move, from the live broker data below>
-
-📰 HEADLINES
-<3-6 bullets, most recent first, each starting with its date (e.g. "08/06 — ").
- Prioritise the last 7 days. Company news, not sector commentary.>
-
-📊 WHY IT MOVED
-<1-3 bullets tying recent price action to specific causes. If the move was
- sector- or market-wide rather than company-specific, say so.>
-
-🎯 ANALYST ACTIONS
-<Upgrades, downgrades and price-target changes in the last ~30 days, each with
- the firm name and date. If there were none, write "None in the last 30 days.">
-
-📅 NEXT UP
-<Next earnings date, plus any scheduled events, lockups, product launches or
- index changes. Say if the earnings date is estimated rather than confirmed.>
-
-📰 SOURCES
-<one line: publication names only, comma-separated. No URLs, no brackets.>
-
-RULES:
-- Search the web. Report only what you can verify, with dates.
-- Never invent a headline, number, price target or date. Omit rather than guess.
-- Report facts and what analysts are saying. Do NOT tell the reader to buy,
-  sell, hedge or adjust anything, and do NOT suggest position sizing.
-- If the reader holds a position, state it factually without advising on it.
-"""
 
 
 def held_tickers():
@@ -985,11 +813,11 @@ def handle(cfg, chat_id, text, guest=False):
 
     if cmd in ("start", "help"):
         reply(cfg, chat_id, HELP)
-    elif cmd in ("portfolio", "p"):
+    elif cmd in ("portfolio", "p", "account"):
+        # /account used to repeat total assets and cash from /portfolio; it is
+        # now an alias, with the margin lines it alone had appended here.
         pos, acc = pb.fetch()
-        reply(cfg, chat_id, pb.build(pos, acc))
-    elif cmd == "account":
-        reply(cfg, chat_id, account_block())
+        reply(cfg, chat_id, pb.build(pos, acc) + "\n\n" + margin_block(acc))
     elif cmd == "orders":
         reply(cfg, chat_id, today_orders())
     elif cmd in ("watchlist", "wl"):
@@ -1062,7 +890,10 @@ def handle(cfg, chat_id, text, guest=False):
             reply(cfg, chat_id, f"'{html.escape(parts[1])[:20]}' is not a ticker.")
             return
         walls(cfg, chat_id, tk)
-    elif cmd in ("csp", "cc", "leaps"):
+    elif cmd in ("csp", "cc", "leaps", "wheel", "w"):
+        # /wheel was a second put chain with a different strike filter, so the
+        # two could suggest different strikes. It is now an alias of /csp.
+        cmd = {"wheel": "csp", "w": "csp"}.get(cmd, cmd)
         parts = t.split()
         if len(parts) < 2:
             eg = {"csp": "NVDA", "cc": "SOFI", "leaps": "NVDA"}[cmd]
@@ -1073,13 +904,7 @@ def handle(cfg, chat_id, text, guest=False):
             reply(cfg, chat_id, f"'{html.escape(parts[1])[:20]}' is not a ticker.")
             return
         chain(cfg, chat_id, tk,
-              {"csp": "put", "cc": "call", "leaps": "leaps"}[cmd])
-    elif cmd in ("wheel", "w"):
-        args = t.split()[1:]
-        if not args:
-            reply(cfg, chat_id, "Usage: /wheel NVDA")
-        else:
-            wheel(cfg, chat_id, args[0].upper().lstrip("$"))
+              {"csp": "put", "cc": "call", "leaps": "leaps"}[cmd], guest=guest)
     elif cmd == "spx":
         spx_check(cfg, chat_id)
     elif cmd == "news":
