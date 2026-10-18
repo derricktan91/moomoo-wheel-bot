@@ -428,6 +428,11 @@ User's question: {text}"""
 
 # ----------------------------------------------------- subprocess runners ----
 
+# futu logs as "2026-09-06 17:52:00,123 [file.py] ..." — never our own output,
+# which is HTML and always starts with '<' or is blank.
+FUTU_LOG = re.compile(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}")
+
+
 def spx_check(cfg, chat_id):
     """SPX bull-put-spread entry scoring. Subprocess so an OpenD hang must not
     take the whole bot down."""
@@ -649,6 +654,105 @@ def chain(cfg, chat_id, ticker, side, guest=False):
             out += ["<b>📌 Current position</b>", html.escape(pos), ""]
     out.append("<i>Last-traded prices; verify the live bid/ask before sending an order.</i>")
     reply(cfg, chat_id, "\n".join(out).rstrip())
+
+
+# ------------------------------------------------------------------ news ----
+
+NEWS_PROMPT = """Produce a market news digest for a retail options trader, current
+as of {when} (US Eastern market context).
+
+FORMAT — follow exactly:
+- PLAIN TEXT ONLY. No markdown, no HTML, no **bold**, no # headings, no tables.
+- NO markdown links. Never write [title](url). Never paste a raw URL.
+- Output ONLY the digest — no preamble, no sign-off, and no commentary about
+  delivery, tooling, or what you can or cannot do. Your output is piped straight
+  to the reader unmodified; anything that isn't the digest is a defect.
+- Under 3500 characters total.
+- Use these sections, in this order, with these exact emoji markers:
+
+🌍 MARKET NEWS — {when}
+
+📉 TAPE
+<index levels and moves: S&P 500, Nasdaq, Dow. Then VIX, US 10-year yield,
+ dollar index, oil, gold. One compact line each or grouped — numbers, not adjectives.>
+
+🏦 MACRO & POLICY
+<2-4 bullets: Fed/rate expectations, latest inflation or jobs prints, central
+ bank moves, fiscal or regulatory news that moved markets>
+
+🌐 GEOPOLITICS
+<1-3 bullets: only items with a real market transmission channel — trade,
+ tariffs, conflict affecting energy or supply chains, sanctions, elections.
+ Skip if nothing material; write "Nothing market-moving." >
+
+⚡ SECTOR MOVERS
+<2-4 bullets: what drove the big sectors, especially semis/AI infrastructure,
+ memory, software, fintech>
+
+📌 YOUR NAMES
+<Only headlines from the last 48h that touch these tickers: {tickers}
+ One line per ticker that actually has news. Name the ticker first. If none of
+ them had news, write "No stock-specific headlines.">
+
+📅 NEXT UP
+<Upcoming catalysts in the next 1-2 weeks: economic releases with dates, Fed
+ meetings, notable earnings — especially for the tickers above>
+
+RULES:
+- Search the web. Report only what you can verify, and prefer items from the
+  last 24-48 hours. Include the date for anything older.
+- Never invent a number, a level, or a headline. If you cannot verify something,
+  omit it rather than estimating.
+- Report facts and what analysts/markets are pricing. Do NOT tell the reader to
+  buy, sell, hedge, or adjust anything, and do NOT suggest position sizing.
+- Be dense. This is a briefing, not an essay.
+"""
+
+
+TICKER_NEWS_PROMPT = """Produce a recent-news digest for {ticker}, current as of {when}.
+
+This is a NEWS digest, not a valuation report — focus on what has actually
+happened lately and what is scheduled next. Do not assess whether the stock is
+cheap or expensive.
+
+FORMAT — follow exactly:
+- PLAIN TEXT ONLY. No markdown, no HTML, no **bold**, no # headings, no tables.
+- NO markdown links. Never write [title](url). Never paste a raw URL.
+- Output ONLY the digest — no preamble, no sign-off, and no commentary about
+  delivery, tooling, or what you can or cannot do. Your output is piped straight
+  to the reader unmodified; anything that isn't the digest is a defect.
+- Under 3000 characters total.
+- Use these sections, in this order, with these exact emoji markers:
+
+🗞️ {ticker} NEWS — {when}
+<one line: current price and recent move, from the live broker data below>
+
+📰 HEADLINES
+<3-6 bullets, most recent first, each starting with its date (e.g. "08/06 — ").
+ Prioritise the last 7 days. Company news, not sector commentary.>
+
+📊 WHY IT MOVED
+<1-3 bullets tying recent price action to specific causes. If the move was
+ sector- or market-wide rather than company-specific, say so.>
+
+🎯 ANALYST ACTIONS
+<Upgrades, downgrades and price-target changes in the last ~30 days, each with
+ the firm name and date. If there were none, write "None in the last 30 days.">
+
+📅 NEXT UP
+<Next earnings date, plus any scheduled events, lockups, product launches or
+ index changes. Say if the earnings date is estimated rather than confirmed.>
+
+📰 SOURCES
+<one line: publication names only, comma-separated. No URLs, no brackets.>
+
+RULES:
+- Search the web. Report only what you can verify, with dates.
+- Never invent a headline, number, price target or date. Omit rather than guess.
+- Report facts and what analysts are saying. Do NOT tell the reader to buy,
+  sell, hedge or adjust anything, and do NOT suggest position sizing.
+- If the reader holds a position, state it factually without advising on it.
+"""
 
 
 def held_tickers():

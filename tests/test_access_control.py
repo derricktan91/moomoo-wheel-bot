@@ -19,7 +19,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import bb_telegram_alert as bb          # noqa: E402
 import telegram_bot as tb               # noqa: E402
 
-REAL_CHAIN = tb.chain                   # the fixture stubs it; one test needs the real one
+REAL_CHAIN = tb.chain                   # the fixture stubs these; some tests need the real ones
+REAL_SPX = tb.spx_check
 
 OWNER = "100000001"
 GUEST = "111222333"
@@ -178,3 +179,35 @@ def test_csp_hides_the_owner_position_from_guests(bot, monkeypatch):
         REAL_CHAIN(cfg, GUEST if guest else OWNER, "AMKR", "put", guest=guest)
         shown = "SHORT 1x AMKR" in sent[-1][1]
         assert shown == should_show, f"guest={guest}: position shown={shown}"
+
+
+# --- handlers that run in a subprocess or call Claude ----------------------
+# These only fail at call time, so a missing module-level name (a regex, a
+# prompt) slips past import. Each is exercised here with its I/O stubbed.
+
+def test_spx_check_renders(bot, monkeypatch):
+    cfg, sent, _ = bot
+    out = "2026-10-18 15:00:00,000 futu log line\n<b>📐 SPX put spread</b>\n\nbody"
+    monkeypatch.setattr(tb.subprocess, "run",
+                        lambda *a, **k: type("P", (), {"stdout": out, "stderr": ""})())
+    sent.clear()
+    REAL_SPX(cfg, OWNER)
+    assert sent[-1][1].startswith("<b>📐 SPX put spread</b>"), sent[-1][1]
+    assert "futu log" not in sent[-1][1]
+
+
+@pytest.mark.parametrize("msg", ["/news", "/news SOFI"])
+def test_news_builds_its_prompt(bot, monkeypatch, msg):
+    cfg, sent, _ = bot
+    seen = {}
+    monkeypatch.setattr(tb, "ask_claude",
+                        lambda cfg, prompt, tools="", **k: (seen.update(p=prompt, t=tools) or ("digest", None)))
+    monkeypatch.setattr(tb, "position_context", lambda t: "No position held.")
+    monkeypatch.setattr(tb, "held_tickers", lambda: set())
+    monkeypatch.setattr(tb, "quote_block", lambda tickers: [
+        {"ticker": t, "price": 15.0, "pct_b": 0.4, "label": "mid", "rsi": 40.0, "bar": "2026-10-16"}
+        for t in tickers])
+    sent.clear()
+    tb.handle(cfg, OWNER, msg)
+    assert seen.get("p"), f"{msg} never reached the model: {sent}"
+    assert "Bash" not in seen["t"] and "Write" not in seen["t"]
