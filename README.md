@@ -1,12 +1,13 @@
 # moomoo-wheel-bot
 
 A personal trading-automation system for an options wheel strategy: a Telegram
-bot over a live brokerage account, a technical scanner across a 30-ticker
+bot over a live brokerage account, a technical scanner across US markets, create
 watchlist, scheduled daily reporting, and a backtesting harness.
 
 Built for my own account against the [moomoo OpenD](https://openapi.moomoo.com/)
 API. Read-only by design — **there is no order-placing code path anywhere in
 this repository.**
+
 
 ---
 
