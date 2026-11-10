@@ -249,11 +249,14 @@ def quote_block(tickers):
     out = []
     try:
         codes = [f"US.{t}" for t in tickers]
-        live = {}
+        live, prev = {}, {}
         ret, snap = ctx.get_market_snapshot(codes)
         if ret == RET_OK and snap is not None:
             for _, row in snap.iterrows():
-                live[str(row["code"]).replace("US.", "")] = float(row["last_price"])
+                k = str(row["code"]).replace("US.", "")
+                live[k] = float(row["last_price"])
+                if float(row.get("prev_close_price") or 0) > 0:
+                    prev[k] = float(row["prev_close_price"])
         for i, t in enumerate(tickers):
             ret, data, _ = ctx.request_history_kline(
                 code=f"US.{t}", start=start, end=today.isoformat(),
@@ -265,7 +268,11 @@ def quote_block(tickers):
             price = live.get(t, last_close)
             pb_ = pct_b_of(price, lower, upper)
             zone, emoji, label = classify(pb_)
-            out.append({"ticker": t, "price": price, "mid": mid, "upper": upper,
+            # Daily change vs the previous session's close. The snapshot has it
+            # directly; fall back to the last two daily bars if it is missing.
+            base = prev.get(t) or (float(data["close"].iloc[-2]) if t not in live else None)
+            chg = (price / base - 1) * 100 if base else None
+            out.append({"ticker": t, "price": price, "chg_pct": chg, "mid": mid, "upper": upper,
                         "lower": lower, "pct_b": pb_, "rsi": rsi, "label": label,
                         "emoji": emoji, "bar": str(data["time_key"].iloc[-1])[:10]})
             if i < len(tickers) - 1:
@@ -273,6 +280,12 @@ def quote_block(tickers):
     finally:
         ctx.close()
     return out
+
+
+def fmt_chg(c):
+    if c is None:
+        return ""
+    return f"  {'▲' if c >= 0 else '▼'} {c:+.2f}%"
 
 
 def fmt_quotes(rows):
@@ -283,7 +296,7 @@ def fmt_quotes(rows):
             continue
         tag = f"{r['emoji']} " if r["emoji"] else ""
         lines.append(
-            f"{tag}<b>{r['ticker']}</b>  ${r['price']:,.2f}\n"
+            f"{tag}<b>{r['ticker']}</b>  ${r['price']:,.2f}{fmt_chg(r.get('chg_pct'))}\n"
             f"    {r['label']} · %B {r['pct_b']:.2f} · RSI {r['rsi']:.1f}\n"
             f"    lower ${r['lower']:,.2f} · mid ${r['mid']:,.2f} · upper ${r['upper']:,.2f}"
             + (f"\n    🎯 LEAPS zone" if r["pct_b"] <= LEAPS_PCT_B else "")
